@@ -1,0 +1,217 @@
+use axum::{
+    Json,
+    extract::{Query, State},
+};
+
+use crate::AppState;
+use crate::auth::UserId;
+use crate::error::AppError;
+use crate::repository::{
+    PortfolioRepository, SettingsRepository, TransactionRepository, UserRepository,
+};
+use crate::response::ApiResponse;
+use crate::schemas::{
+    AuthResponse, CategorySummary, CreatePortfolioItem, CreateTransaction, DateRangeParams,
+    FinancialHealth, LoginRequest, RegisterRequest, Transaction, TransactionId, UpdateCurrency,
+    UpdateTransaction,
+};
+use crate::services::{AuthService, FinanceService, TransactionService};
+
+// --- Auth Handlers ---
+
+pub async fn register(
+    State(state): State<AppState>,
+    Json(payload): Json<RegisterRequest>,
+) -> Result<Json<ApiResponse<AuthResponse>>, AppError> {
+    let user_repo = UserRepository::new(state.db.clone());
+    let settings_repo = SettingsRepository::new(state.db.clone());
+    let auth_service = AuthService::new(user_repo, settings_repo);
+
+    let response = auth_service.register(payload).await?;
+
+    Ok(Json(ApiResponse::success(response, None)))
+}
+
+pub async fn login(
+    State(state): State<AppState>,
+    Json(payload): Json<LoginRequest>,
+) -> Result<Json<ApiResponse<AuthResponse>>, AppError> {
+    let user_repo = UserRepository::new(state.db.clone());
+    let settings_repo = SettingsRepository::new(state.db.clone());
+    let auth_service = AuthService::new(user_repo, settings_repo);
+
+    let response = auth_service.login(payload).await?;
+
+    Ok(Json(ApiResponse::success(response, None)))
+}
+
+// --- Protected Handlers ---
+
+pub async fn create_transaction(
+    State(state): State<AppState>,
+    user_id: UserId,
+    Json(payload): Json<CreateTransaction>,
+) -> Result<Json<ApiResponse<TransactionId>>, AppError> {
+    let transaction_repo = TransactionRepository::new(state.db.clone());
+    let service = TransactionService::new(transaction_repo);
+
+    let id = service.create_transaction(user_id.0, payload).await?;
+
+    Ok(Json(ApiResponse::success(
+        TransactionId { id },
+        Some("Transaction saved".to_string()),
+    )))
+}
+
+pub async fn update_transaction(
+    State(state): State<AppState>,
+    user_id: UserId,
+    path: axum::extract::Path<uuid::Uuid>,
+    Json(payload): Json<UpdateTransaction>,
+) -> Result<Json<ApiResponse<String>>, AppError> {
+    let transaction_repo = TransactionRepository::new(state.db.clone());
+    let service = TransactionService::new(transaction_repo);
+
+    service
+        .update_transaction(path.0, user_id.0, payload)
+        .await?;
+
+    Ok(Json(ApiResponse::success(
+        "Transaction updated".to_string(),
+        None,
+    )))
+}
+
+pub async fn delete_transaction(
+    State(state): State<AppState>,
+    user_id: UserId,
+    path: axum::extract::Path<uuid::Uuid>,
+) -> Result<Json<ApiResponse<String>>, AppError> {
+    let transaction_repo = TransactionRepository::new(state.db.clone());
+    let service = TransactionService::new(transaction_repo);
+
+    service.delete_transaction(path.0, user_id.0).await?;
+
+    Ok(Json(ApiResponse::success(
+        "Transaction deleted".to_string(),
+        None,
+    )))
+}
+
+pub async fn get_transactions(
+    State(state): State<AppState>,
+    user_id: UserId,
+    Query(params): Query<DateRangeParams>,
+) -> Result<Json<ApiResponse<Vec<Transaction>>>, AppError> {
+    let transaction_repo = TransactionRepository::new(state.db.clone());
+    let service = TransactionService::new(transaction_repo);
+
+    let rows = service
+        .get_transactions(user_id.0, params.start_date, params.end_date)
+        .await?;
+
+    Ok(Json(ApiResponse::success(rows, None)))
+}
+
+pub async fn get_spending_analysis(
+    State(state): State<AppState>,
+    user_id: UserId,
+    Query(params): Query<DateRangeParams>,
+) -> Result<Json<ApiResponse<Vec<CategorySummary>>>, AppError> {
+    let transaction_repo = TransactionRepository::new(state.db.clone());
+    let service = TransactionService::new(transaction_repo);
+
+    let rows = service
+        .get_spending_analysis(user_id.0, params.start_date, params.end_date)
+        .await?;
+
+    Ok(Json(ApiResponse::success(rows, None)))
+}
+
+pub async fn get_financial_health(
+    State(state): State<AppState>,
+    user_id: UserId,
+) -> Result<Json<ApiResponse<FinancialHealth>>, AppError> {
+    let portfolio_repo = PortfolioRepository::new(state.db.clone());
+    let transaction_repo = TransactionRepository::new(state.db.clone());
+    let settings_repo = SettingsRepository::new(state.db.clone());
+
+    let service = FinanceService::new(portfolio_repo, transaction_repo, settings_repo);
+
+    let health = service.get_financial_health(user_id.0).await?;
+
+    Ok(Json(ApiResponse::success(health, None)))
+}
+
+pub async fn refresh_portfolio(
+    State(state): State<AppState>,
+    user_id: UserId,
+) -> Result<Json<ApiResponse<String>>, AppError> {
+    let portfolio_repo = PortfolioRepository::new(state.db.clone());
+    let transaction_repo = TransactionRepository::new(state.db.clone());
+    let settings_repo = SettingsRepository::new(state.db.clone());
+
+    let service = FinanceService::new(portfolio_repo, transaction_repo, settings_repo);
+
+    let updated_count = service.refresh_portfolio(user_id.0).await?;
+
+    Ok(Json(ApiResponse::success(
+        format!("Updated {} assets", updated_count),
+        None,
+    )))
+}
+
+pub async fn add_investment(
+    State(state): State<AppState>,
+    user_id: UserId,
+    Json(payload): Json<CreatePortfolioItem>,
+) -> Result<Json<ApiResponse<String>>, AppError> {
+    let portfolio_repo = PortfolioRepository::new(state.db.clone());
+    let transaction_repo = TransactionRepository::new(state.db.clone());
+    let settings_repo = SettingsRepository::new(state.db.clone());
+
+    let service = FinanceService::new(portfolio_repo, transaction_repo, settings_repo);
+    let ticker = payload.ticker.clone();
+
+    service.add_investment(user_id.0, payload).await?;
+
+    Ok(Json(ApiResponse::success(
+        format!("Added {} to portfolio", ticker),
+        None,
+    )))
+}
+
+pub async fn get_portfolio(
+    State(state): State<AppState>,
+    user_id: UserId,
+) -> Result<Json<ApiResponse<Vec<crate::schemas::InvestmentSummary>>>, AppError> {
+    let portfolio_repo = PortfolioRepository::new(state.db.clone());
+    let transaction_repo = TransactionRepository::new(state.db.clone());
+    let settings_repo = SettingsRepository::new(state.db.clone());
+
+    let service = FinanceService::new(portfolio_repo, transaction_repo, settings_repo);
+    let summary = service.get_portfolio_list(user_id.0).await?;
+
+    Ok(Json(ApiResponse::success(summary, None)))
+}
+
+pub async fn update_base_currency(
+    State(state): State<AppState>,
+    user_id: UserId,
+    Json(payload): Json<UpdateCurrency>,
+) -> Result<Json<ApiResponse<String>>, AppError> {
+    let portfolio_repo = PortfolioRepository::new(state.db.clone());
+    let transaction_repo = TransactionRepository::new(state.db.clone());
+    let settings_repo = SettingsRepository::new(state.db.clone());
+
+    let service = FinanceService::new(portfolio_repo, transaction_repo, settings_repo);
+
+    service
+        .update_base_currency(user_id.0, payload.base_currency)
+        .await?;
+
+    Ok(Json(ApiResponse::success(
+        "Base currency updated".to_string(),
+        None,
+    )))
+}

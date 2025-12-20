@@ -1,0 +1,31 @@
+services:
+  # The Database Service
+  db:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=phoebudget
+    ports:
+      - "5432:5432" # Expose port locally so you can still inspect with a GUI tool
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Mount a script to initialize tables automatically if DB is fresh
+      - ./migrations:/docker-entrypoint-initdb.d
+
+  # Your Rust App Service
+  api:
+    build: .
+    restart: on-failure
+    depends_on:
+      - db
+    ports:
+      - "3000:3000"
+    environment:
+      # CRITICAL: We use "db" (the service name above) instead of "localhost"
+      - DATABASE_URL=postgres://postgres:password@db:5432/phoebudget
+      - RUST_LOG=debug
+
+volumes:
+  postgres_data:
