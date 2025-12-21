@@ -40,6 +40,9 @@ echo "### Updating Nginx configuration with domain name..."
 sed -i "s/YOUR_DOMAIN.COM/$DOMAIN_NAME/g" ./nginx/conf.d/init.conf
 sed -i "s/YOUR_DOMAIN.COM/$DOMAIN_NAME/g" ./nginx/conf.d/default.conf
 
+# Temporarily disable the production config (which requires SSL certs) so Nginx can start with just init.conf
+mv ./nginx/conf.d/default.conf ./nginx/conf.d/default.conf.disabled
+
 echo "### Starting Nginx (HTTP only)..."
 docker compose --env-file .env.prod -f docker-compose.prod.yml up --force-recreate -d nginx
 echo
@@ -83,6 +86,7 @@ echo "### Preparing Production Configuration ..."
 # A simpler way: Rename default.conf.disabled to default.conf after cert is obtained.
 
 mv ./nginx/conf.d/init.conf ./nginx/conf.d/init.conf.bak
+mv ./nginx/conf.d/default.conf.disabled ./nginx/conf.d/default.conf
 # Ensure default.conf is active
 docker compose --env-file .env.prod -f docker-compose.prod.yml restart nginx
 
