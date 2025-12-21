@@ -39,7 +39,7 @@ sed -i "s/YOUR_DOMAIN.COM/$DOMAIN_NAME/g" ./nginx/conf.d/init.conf
 sed -i "s/YOUR_DOMAIN.COM/$DOMAIN_NAME/g" ./nginx/conf.d/default.conf
 
 echo "### Starting Nginx (HTTP only)..."
-docker compose -f docker-compose.prod.yml up --force-recreate -d nginx
+docker compose --env-file .env.prod -f docker-compose.prod.yml up --force-recreate -d nginx
 echo
 
 echo "### Requesting Let's Encrypt certificate for $domains ..."
@@ -58,7 +58,7 @@ esac
 # Enable staging mode if needed
 if [ $staging != "0" ]; then staging_arg="--staging"; fi
 
-docker compose -f docker-compose.prod.yml run --rm --entrypoint "\
+docker compose --env-file .env.prod -f docker-compose.prod.yml run --rm --entrypoint "\
   certbot certonly --webroot -w /var/www/certbot \
     $staging_arg \
     $email_arg \
@@ -69,7 +69,7 @@ docker compose -f docker-compose.prod.yml run --rm --entrypoint "\
 echo
 
 echo "### Reloading Nginx ..."
-docker compose -f docker-compose.prod.yml exec nginx nginx -s reload
+docker compose --env-file .env.prod -f docker-compose.prod.yml exec nginx nginx -s reload
 
 echo "### Preparing Production Configuration ..."
 # Swap the init config (which only handles ACME) with the real config (which does SSL termination)
@@ -82,9 +82,9 @@ echo "### Preparing Production Configuration ..."
 
 mv ./nginx/conf.d/init.conf ./nginx/conf.d/init.conf.bak
 # Ensure default.conf is active
-docker compose -f docker-compose.prod.yml restart nginx
+docker compose --env-file .env.prod -f docker-compose.prod.yml restart nginx
 
 echo "### Starting entire stack ..."
-docker compose -f docker-compose.prod.yml up -d
+docker compose --env-file .env.prod -f docker-compose.prod.yml up -d
 
 echo "✅ Setup complete! Your app should be live at https://$DOMAIN_NAME"
