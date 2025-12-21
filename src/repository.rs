@@ -238,9 +238,10 @@ impl PortfolioRepository {
     pub async fn get_total_invested(&self, user_id: Uuid) -> Result<Decimal, AppError> {
         let result = sqlx::query!(
             r#"
-            SELECT COALESCE(SUM(quantity * current_price), 0) as "total_invested!"
-            FROM portfolio
-            WHERE user_id = $1
+            SELECT COALESCE(SUM(p.quantity * a.current_price), 0) as "total_invested!"
+            FROM portfolio p
+            JOIN assets a ON p.ticker = a.ticker
+            WHERE p.user_id = $1
             "#,
             user_id
         )
@@ -259,9 +260,9 @@ impl PortfolioRepository {
         Ok(rows.into_iter().filter_map(|r| r.ticker).collect())
     }
 
-    pub async fn update_price(&self, ticker: &str, price: Decimal) -> Result<(), AppError> {
+    pub async fn update_asset_price(&self, ticker: &str, price: Decimal) -> Result<(), AppError> {
         sqlx::query!(
-            "UPDATE portfolio SET current_price = $1, last_updated = NOW() WHERE ticker = $2",
+            "UPDATE assets SET current_price = $1, last_updated = NOW() WHERE ticker = $2",
             price,
             ticker
         )
@@ -280,19 +281,13 @@ impl PortfolioRepository {
         Ok(())
     }
 
-    pub async fn add_item(
-        &self,
-        user_id: Uuid,
-        item: CreatePortfolioItem,
-        current_price: Decimal,
-    ) -> Result<(), AppError> {
+    pub async fn add_item(&self, user_id: Uuid, item: CreatePortfolioItem) -> Result<(), AppError> {
         sqlx::query!(
-            "INSERT INTO portfolio (user_id, ticker, quantity, avg_buy_price, current_price) VALUES ($1, $2, $3, $4, $5)",
+            "INSERT INTO portfolio (user_id, ticker, quantity, avg_buy_price) VALUES ($1, $2, $3, $4)",
             user_id,
             item.ticker,
             item.quantity,
-            item.avg_buy_price,
-            current_price
+            item.avg_buy_price
         )
         .execute(&self.pool)
         .await?;
@@ -309,7 +304,7 @@ impl PortfolioRepository {
                 a.name, 
                 p.quantity, 
                 p.avg_buy_price, 
-                p.current_price
+                a.current_price
             FROM portfolio p
             LEFT JOIN assets a ON p.ticker = a.ticker
             WHERE p.user_id = $1
@@ -360,8 +355,7 @@ impl PortfolioRepository {
             UPDATE portfolio 
             SET 
                 quantity = COALESCE($3, quantity), 
-                avg_buy_price = COALESCE($4, avg_buy_price),
-                last_updated = NOW()
+                avg_buy_price = COALESCE($4, avg_buy_price)
             WHERE user_id = $1 AND ticker = $2
             "#,
             user_id,

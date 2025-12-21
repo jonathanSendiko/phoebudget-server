@@ -149,7 +149,12 @@ pub async fn get_financial_health(
     let transaction_repo = TransactionRepository::new(state.db.clone());
     let settings_repo = SettingsRepository::new(state.db.clone());
 
-    let service = FinanceService::new(portfolio_repo, transaction_repo, settings_repo);
+    let service = FinanceService::new(
+        portfolio_repo,
+        transaction_repo,
+        settings_repo,
+        state.price_cache.clone(),
+    );
 
     let health = service.get_financial_health(user_id.0).await?;
 
@@ -164,7 +169,12 @@ pub async fn refresh_portfolio(
     let transaction_repo = TransactionRepository::new(state.db.clone());
     let settings_repo = SettingsRepository::new(state.db.clone());
 
-    let service = FinanceService::new(portfolio_repo, transaction_repo, settings_repo);
+    let service = FinanceService::new(
+        portfolio_repo,
+        transaction_repo,
+        settings_repo,
+        state.price_cache.clone(),
+    );
 
     let updated_count = service.refresh_portfolio(user_id.0).await?;
 
@@ -183,7 +193,12 @@ pub async fn add_investment(
     let transaction_repo = TransactionRepository::new(state.db.clone());
     let settings_repo = SettingsRepository::new(state.db.clone());
 
-    let service = FinanceService::new(portfolio_repo, transaction_repo, settings_repo);
+    let service = FinanceService::new(
+        portfolio_repo,
+        transaction_repo,
+        settings_repo,
+        state.price_cache.clone(),
+    );
     let ticker = payload.ticker.clone();
 
     service.add_investment(user_id.0, payload).await?;
@@ -202,7 +217,12 @@ pub async fn get_portfolio(
     let transaction_repo = TransactionRepository::new(state.db.clone());
     let settings_repo = SettingsRepository::new(state.db.clone());
 
-    let service = FinanceService::new(portfolio_repo, transaction_repo, settings_repo);
+    let service = FinanceService::new(
+        portfolio_repo,
+        transaction_repo,
+        settings_repo,
+        state.price_cache.clone(),
+    );
     let summary = service.get_portfolio_list(user_id.0).await?;
 
     Ok(Json(ApiResponse::success(summary, None)))
@@ -217,7 +237,12 @@ pub async fn update_base_currency(
     let transaction_repo = TransactionRepository::new(state.db.clone());
     let settings_repo = SettingsRepository::new(state.db.clone());
 
-    let service = FinanceService::new(portfolio_repo, transaction_repo, settings_repo);
+    let service = FinanceService::new(
+        portfolio_repo,
+        transaction_repo,
+        settings_repo,
+        state.price_cache.clone(),
+    );
 
     service
         .update_base_currency(user_id.0, payload.base_currency)
@@ -238,7 +263,12 @@ pub async fn remove_investment(
     let transaction_repo = TransactionRepository::new(state.db.clone());
     let settings_repo = SettingsRepository::new(state.db.clone());
 
-    let service = FinanceService::new(portfolio_repo, transaction_repo, settings_repo);
+    let service = FinanceService::new(
+        portfolio_repo,
+        transaction_repo,
+        settings_repo,
+        state.price_cache.clone(),
+    );
     service.remove_investment(user_id.0, path.0).await?;
 
     Ok(Json(ApiResponse::success(
@@ -257,7 +287,12 @@ pub async fn update_investment(
     let transaction_repo = TransactionRepository::new(state.db.clone());
     let settings_repo = SettingsRepository::new(state.db.clone());
 
-    let service = FinanceService::new(portfolio_repo, transaction_repo, settings_repo);
+    let service = FinanceService::new(
+        portfolio_repo,
+        transaction_repo,
+        settings_repo,
+        state.price_cache.clone(),
+    );
     service
         .update_investment(user_id.0, path.0, payload)
         .await?;

@@ -212,6 +212,7 @@ pub struct FinanceService {
     portfolio_repo: PortfolioRepository,
     transaction_repo: TransactionRepository,
     settings_repo: SettingsRepository,
+    price_cache: moka::future::Cache<String, Decimal>,
 }
 
 impl FinanceService {
@@ -219,11 +220,13 @@ impl FinanceService {
         portfolio_repo: PortfolioRepository,
         transaction_repo: TransactionRepository,
         settings_repo: SettingsRepository,
+        price_cache: moka::future::Cache<String, Decimal>,
     ) -> Self {
         Self {
             portfolio_repo,
             transaction_repo,
             settings_repo,
+            price_cache,
         }
     }
 
@@ -253,9 +256,7 @@ impl FinanceService {
         let mut updated_count = 0;
 
         for ticker in tickers {
-            // Note: Parallelism could be improved here with futures::stream
-            let price = investments::fetch_price(&ticker).await?;
-            self.portfolio_repo.update_price(&ticker, price).await?;
+            self.ensure_price_fresh(&ticker).await?;
             updated_count += 1;
         }
 
@@ -267,43 +268,84 @@ impl FinanceService {
         user_id: Uuid,
         item: CreatePortfolioItem,
     ) -> Result<(), AppError> {
-        // Validate ticker by fetching price first
-        let current_price = investments::fetch_price(&item.ticker).await.map_err(|e| {
-            AppError::ValidationError(format!(
-                "Failed to validate ticker {}: {:?}",
-                item.ticker, e
-            ))
-        })?;
+        // Validate ticker and ensure price is in assets table
+        self.ensure_price_fresh(&item.ticker).await?;
+
+        // Ensure asset exists in DB (already done by update_asset_price if we did it right,
+        // but ensure_asset_exists handles the initial insert if not present)
+        // Actually fetch_price calls Yahoo, if valid we proceed.
 
         self.portfolio_repo
             .ensure_asset_exists(&item.ticker)
             .await?;
 
-        match self
-            .portfolio_repo
-            .add_item(user_id, item.clone(), current_price)
-            .await
-        {
+        match self.portfolio_repo.add_item(user_id, item.clone()).await {
             Ok(_) => Ok(()),
-            Err(AppError::DatabaseError(e)) => {
-                let msg = e.to_string();
+            Err(e) => {
+                // AppError is likely DatabaseError
+                // Simple string matching for now
+                let msg = format!("{:?}", e);
                 if msg.contains("duplicate key value") {
                     Err(AppError::ValidationError(format!(
                         "{} is already in your portfolio",
                         &item.ticker
                     )))
                 } else {
-                    Err(AppError::DatabaseError(e))
+                    Err(e)
                 }
             }
-            Err(other) => Err(other),
         }
+    }
+
+    // Helper to get price with cache
+    async fn ensure_price_fresh(&self, ticker: &str) -> Result<Decimal, AppError> {
+        if let Some(price) = self.price_cache.get(ticker).await {
+            tracing::info!("Cache HIT for {}", ticker);
+            return Ok(price);
+        }
+        tracing::info!("Cache MISS for {}", ticker);
+
+        let price = investments::fetch_price(ticker).await?;
+
+        // Update DB
+        // If asset doesn't exist, update_asset_price might list 0 rows affected if used strict update.
+        // But we usually ensure asset exists before.
+        // Let's assume asset exists or we act gracefully.
+        // Actually, for "Refresh", assets exist.
+        // For "Add", we call ensure_asset_exists first?
+        // Let's call ensure_asset_exists here if we want to be safe, or just update.
+        // PortfolioRepo::update_asset_price works on 'assets' table.
+        // If the asset isn't in 'assets' table, this does nothing.
+        // Optimization: Check DB first? No.
+
+        // We need to ensure the asset record exists to store the price.
+        self.portfolio_repo.ensure_asset_exists(ticker).await?;
+        self.portfolio_repo
+            .update_asset_price(ticker, price)
+            .await?;
+
+        self.price_cache.insert(ticker.to_string(), price).await;
+
+        Ok(price)
     }
 
     pub async fn get_portfolio_list(
         &self,
         user_id: Uuid,
     ) -> Result<Vec<crate::schemas::InvestmentSummary>, AppError> {
+        // Ensure prices are fresh first
+        let tickers = self.portfolio_repo.get_tickers(user_id).await?;
+        for ticker in tickers {
+            // We ignore errors here to allow partial success?
+            // Or we strictly fail if one price/API fails?
+            // "get investments... fetch from cache... avoiding race condition"
+            // Let's propagate error for now to be safe, or log it?
+            // Given fetch_price might fail if API is down, maybe we shouldn't block the UI?
+            // But user requirement implies we must fetch.
+            // Let's await properly.
+            self.ensure_price_fresh(&ticker).await?;
+        }
+
         let raw_items = self.portfolio_repo.get_all_joined(user_id).await?;
         let mut summary_list = Vec::new();
 

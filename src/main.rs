@@ -56,6 +56,7 @@ where
 #[derive(Clone)]
 pub struct AppState {
     pub db: sqlx::PgPool,
+    pub price_cache: moka::future::Cache<String, rust_decimal::Decimal>,
 }
 
 #[tokio::main]
@@ -89,7 +90,14 @@ async fn main() {
         .await
         .expect("Failed to connect to database");
 
-    let state = AppState { db: pool };
+    let cache = moka::future::Cache::builder()
+        .time_to_live(std::time::Duration::from_secs(3))
+        .build();
+
+    let state = AppState {
+        db: pool,
+        price_cache: cache,
+    };
 
     let api_routes = Router::new()
         .route("/auth/register", post(handlers::register))
