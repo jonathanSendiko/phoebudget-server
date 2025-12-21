@@ -1,0 +1,74 @@
+services:
+  # The Database Service
+  db:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      # In production, we'll read these from the .env file (or .env.prod)
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    volumes:
+      - postgres_prod_data:/var/lib/postgresql/data
+      # Still useful to have migrations if needed, but the app should handle migration on start ideally or via a separate job
+      # For now, we keep it consistent with the dev setup so it auto-inits if empty
+      - ./migrations:/docker-entrypoint-initdb.d
+    networks:
+      - app_network
+
+  # Your Rust App Service
+  api:
+    build: .
+    restart: always
+    depends_on:
+      - db
+    environment:
+      # Construct the DB URL from the env vars
+      - DATABASE_URL=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      - RUST_LOG=info
+      # Binding to 0.0.0.0 is important inside the container
+      - HOST=0.0.0.0
+      - PORT=3000
+    networks:
+      - app_network
+    # In production, we don't expose 3000 to the host directly; Nginx handles ingress.
+    # But if you want to debug locally without Nginx, you could uncomment ports.
+    # ports:
+    #   - "3000:3000"
+
+    # Nginx Reverse Proxy & SSL
+  nginx:
+    image: nginx:1.25-alpine
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # Mount the config folder; setup.sh will swap init.conf and default.conf
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      # Certbot webroot for the HTTP challenge
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    depends_on:
+      - api
+    networks:
+      - app_network
+    command: "/bin/sh -c 'while :; do sleep 6h & wait $${!}; nginx -s reload; done & nginx -g \"daemon off;\"'"
+
+  # Certbot for SSL
+  certbot:
+    image: certbot/certbot
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    # Run certbot to renew every 12 hours
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+    networks:
+      - app_network
+
+networks:
+  app_network:
+    driver: bridge
+
+volumes:
+  postgres_prod_data:
