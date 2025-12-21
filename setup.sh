@@ -39,7 +39,7 @@ sed -i "s/YOUR_DOMAIN.COM/$DOMAIN_NAME/g" ./nginx/conf.d/init.conf
 sed -i "s/YOUR_DOMAIN.COM/$DOMAIN_NAME/g" ./nginx/conf.d/default.conf
 
 echo "### Starting Nginx (HTTP only)..."
-docker-compose -f docker-compose.prod.yml up --force-recreate -d nginx
+docker compose -f docker-compose.prod.yml up --force-recreate -d nginx
 echo
 
 echo "### Requesting Let's Encrypt certificate for $domains ..."
