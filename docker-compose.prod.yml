@@ -25,6 +25,7 @@ services:
     environment:
       # Construct the DB URL from the env vars
       - DATABASE_URL=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      - JWT_SECRET=${JWT_SECRET}
       - RUST_LOG=info
       # Binding to 0.0.0.0 is important inside the container
       - HOST=0.0.0.0

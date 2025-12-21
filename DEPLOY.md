@@ -24,6 +24,9 @@ DOMAIN_NAME=api.yourdomain.com
 # Let's Encrypt Email
 LETSENCRYPT_EMAIL=admin@yourdomain.com
 
+# Auth Secrets
+JWT_SECRET=super_secret_jwt_key_please_change
+
 # Postgres Credentials (CHANGE THESE!)
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=secure_production_password
