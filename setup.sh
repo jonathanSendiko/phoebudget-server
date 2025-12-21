@@ -9,10 +9,10 @@ if [ ! -f .env.prod ]; then
     exit 1
 fi
 
-echo "🔍 Loading environment variables..."
-set -a
-source .env.prod
-set +a
+echo "🔍 Loading configuration..."
+# Manually load only safe variables needed for the script to avoid syntax errors in passwords
+DOMAIN_NAME=$(grep "^DOMAIN_NAME=" .env.prod | cut -d'=' -f2- | tr -d '"' | tr -d "'")
+LETSENCRYPT_EMAIL=$(grep "^LETSENCRYPT_EMAIL=" .env.prod | cut -d'=' -f2- | tr -d '"' | tr -d "'")
 
 domains=($DOMAIN_NAME)
 rsa_key_size=4096
