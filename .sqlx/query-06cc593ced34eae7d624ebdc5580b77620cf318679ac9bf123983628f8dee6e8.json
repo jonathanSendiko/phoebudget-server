@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE portfolio SET current_price = $1, last_updated = NOW() WHERE ticker = $2",
+  "query": "UPDATE assets SET current_price = $1, last_updated = NOW() WHERE ticker = $2",
   "describe": {
     "columns": [],
     "parameters": {
@@ -11,5 +11,5 @@
     },
     "nullable": []
   },
-  "hash": "06ff874e70da38a008f719e4da5b5d5ea11719616a9060d834a95347c7c06e83"
+  "hash": "06cc593ced34eae7d624ebdc5580b77620cf318679ac9bf123983628f8dee6e8"
 }

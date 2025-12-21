@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT \n                p.ticker, \n                a.name, \n                p.quantity, \n                p.avg_buy_price, \n                p.current_price\n            FROM portfolio p\n            LEFT JOIN assets a ON p.ticker = a.ticker\n            WHERE p.user_id = $1\n            ",
+  "query": "\n            SELECT \n                p.ticker, \n                a.name, \n                p.quantity, \n                p.avg_buy_price, \n                a.current_price\n            FROM portfolio p\n            LEFT JOIN assets a ON p.ticker = a.ticker\n            WHERE p.user_id = $1\n            ",
   "describe": {
     "columns": [
       {
@@ -42,5 +42,5 @@
       true
     ]
   },
-  "hash": "4e6b163c6feb21863b927870c502ee59ea4701179bfd1e158cdf7256437b5f87"
+  "hash": "658039fc401a37699320e9a84cd957181bb454447b885394ccb6d461b9a3c0bf"
 }

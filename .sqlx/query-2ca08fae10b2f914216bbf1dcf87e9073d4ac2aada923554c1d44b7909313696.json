@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE portfolio \n            SET \n                quantity = COALESCE($3, quantity), \n                avg_buy_price = COALESCE($4, avg_buy_price)\n            WHERE user_id = $1 AND ticker = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Numeric",
+        "Numeric"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2ca08fae10b2f914216bbf1dcf87e9073d4ac2aada923554c1d44b7909313696"
+}
