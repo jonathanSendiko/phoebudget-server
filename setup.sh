@@ -37,6 +37,15 @@ fi
 
 echo "### Updating Nginx configuration with domain name..."
 # We use sed to replace YOUR_DOMAIN.COM with the actual domain in .env.prod
+# Restore config files if they were renamed in a previous run
+if [ -f ./nginx/conf.d/init.conf.bak ]; then
+    mv ./nginx/conf.d/init.conf.bak ./nginx/conf.d/init.conf
+fi
+
+if [ -f ./nginx/conf.d/default.conf.disabled ]; then
+    mv ./nginx/conf.d/default.conf.disabled ./nginx/conf.d/default.conf
+fi
+
 sed -i "s/YOUR_DOMAIN.COM/$DOMAIN_NAME/g" ./nginx/conf.d/init.conf
 sed -i "s/YOUR_DOMAIN.COM/$DOMAIN_NAME/g" ./nginx/conf.d/default.conf
 
