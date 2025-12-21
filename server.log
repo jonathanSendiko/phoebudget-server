@@ -1,5 +1,0 @@
-   Compiling phoebudget v0.1.0 (/Users/jonathan/Documents/codes/phoebudget)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.14s
-     Running `target/debug/phoebudget`
-Connecting to DB: postgres://jonathan:jo1jo2jo3jo4@localhost:5432/phoebudget
-Server listening on 0.0.0.0:3000
