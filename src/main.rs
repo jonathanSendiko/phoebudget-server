@@ -9,7 +9,7 @@ mod services;
 
 use axum::{
     Router,
-    routing::{get, post, put},
+    routing::{delete, get, post, put},
 };
 use sqlx::postgres::PgPoolOptions;
 use std::net::SocketAddr;
@@ -57,6 +57,11 @@ async fn main() {
         .route("/analysis/category", get(handlers::get_spending_analysis))
         .route("/analysis/net-worth", get(handlers::get_financial_health))
         .route("/portfolio/refresh", post(handlers::refresh_portfolio))
+        .route(
+            "/portfolio/{ticker}",
+            delete(handlers::remove_investment).put(handlers::update_investment),
+        )
+        .route("/auth/profile", get(handlers::get_profile))
         .route(
             "/portfolio",
             post(handlers::add_investment).get(handlers::get_portfolio),

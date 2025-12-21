@@ -120,6 +120,21 @@ pub struct UpdateCurrency {
 }
 
 #[derive(Deserialize, Debug)]
+pub struct UpdateInvestment {
+    pub quantity: Option<Decimal>,
+    pub avg_buy_price: Option<Decimal>,
+}
+
+#[derive(Serialize, Debug)]
+pub struct UserProfile {
+    pub id: Uuid,
+    pub username: String,
+    pub email: String,
+    pub base_currency: String,
+    pub joined_at: DateTime<Utc>,
+}
+
+#[derive(Deserialize, Debug)]
 pub struct LoginRequest {
     pub email: String,
     pub password: String,

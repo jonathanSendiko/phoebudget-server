@@ -13,7 +13,7 @@ use crate::response::ApiResponse;
 use crate::schemas::{
     AuthResponse, CategorySummary, CreatePortfolioItem, CreateTransaction, DateRangeParams,
     FinancialHealth, LoginRequest, RegisterRequest, Transaction, TransactionId, UpdateCurrency,
-    UpdateTransaction,
+    UpdateInvestment, UpdateTransaction, UserProfile,
 };
 use crate::services::{AuthService, FinanceService, TransactionService};
 
@@ -43,6 +43,19 @@ pub async fn login(
     let response = auth_service.login(payload).await?;
 
     Ok(Json(ApiResponse::success(response, None)))
+}
+
+pub async fn get_profile(
+    State(state): State<AppState>,
+    user_id: UserId,
+) -> Result<Json<ApiResponse<UserProfile>>, AppError> {
+    let user_repo = UserRepository::new(state.db.clone());
+    let settings_repo = SettingsRepository::new(state.db.clone());
+    let auth_service = AuthService::new(user_repo, settings_repo);
+
+    let profile = auth_service.get_profile(user_id.0).await?;
+
+    Ok(Json(ApiResponse::success(profile, None)))
 }
 
 // --- Protected Handlers ---
@@ -212,6 +225,45 @@ pub async fn update_base_currency(
 
     Ok(Json(ApiResponse::success(
         "Base currency updated".to_string(),
+        None,
+    )))
+}
+
+pub async fn remove_investment(
+    State(state): State<AppState>,
+    user_id: UserId,
+    path: axum::extract::Path<String>,
+) -> Result<Json<ApiResponse<String>>, AppError> {
+    let portfolio_repo = PortfolioRepository::new(state.db.clone());
+    let transaction_repo = TransactionRepository::new(state.db.clone());
+    let settings_repo = SettingsRepository::new(state.db.clone());
+
+    let service = FinanceService::new(portfolio_repo, transaction_repo, settings_repo);
+    service.remove_investment(user_id.0, path.0).await?;
+
+    Ok(Json(ApiResponse::success(
+        "Investment removed".to_string(),
+        None,
+    )))
+}
+
+pub async fn update_investment(
+    State(state): State<AppState>,
+    user_id: UserId,
+    path: axum::extract::Path<String>,
+    Json(payload): Json<UpdateInvestment>,
+) -> Result<Json<ApiResponse<String>>, AppError> {
+    let portfolio_repo = PortfolioRepository::new(state.db.clone());
+    let transaction_repo = TransactionRepository::new(state.db.clone());
+    let settings_repo = SettingsRepository::new(state.db.clone());
+
+    let service = FinanceService::new(portfolio_repo, transaction_repo, settings_repo);
+    service
+        .update_investment(user_id.0, path.0, payload)
+        .await?;
+
+    Ok(Json(ApiResponse::success(
+        "Investment updated".to_string(),
         None,
     )))
 }

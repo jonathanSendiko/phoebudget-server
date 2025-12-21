@@ -1,5 +1,5 @@
 use crate::error::AppError;
-use crate::schemas::{CategorySummary, CreatePortfolioItem, Transaction, User};
+use crate::schemas::{CategorySummary, CreatePortfolioItem, Transaction, User, UserProfile};
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use sqlx::PgPool;
@@ -51,6 +51,28 @@ impl UserRepository {
         .fetch_one(&self.pool)
         .await?;
         Ok(user_id)
+    }
+    pub async fn get_profile(&self, user_id: Uuid) -> Result<UserProfile, AppError> {
+        let profile = sqlx::query_as!(
+            UserProfile,
+            r#"
+            SELECT 
+                u.id, 
+                u.username, 
+                u.email, 
+                COALESCE(s.base_currency, 'SGD') as "base_currency!",
+                u.created_at as "joined_at!"
+            FROM users u
+            LEFT JOIN user_settings s ON u.id = s.user_id
+            WHERE u.id = $1
+            "#,
+            user_id
+        )
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(AppError::NotFoundError("User not found".to_string()))?;
+
+        Ok(profile)
     }
 }
 
@@ -312,6 +334,44 @@ impl PortfolioRepository {
             .collect();
 
         Ok(result)
+    }
+    pub async fn delete(&self, user_id: Uuid, ticker: &str) -> Result<u64, AppError> {
+        let result = sqlx::query!(
+            "DELETE FROM portfolio WHERE user_id = $1 AND ticker = $2",
+            user_id,
+            ticker
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected())
+    }
+
+    pub async fn update(
+        &self,
+        user_id: Uuid,
+        ticker: &str,
+        quantity: Option<Decimal>,
+        avg_buy_price: Option<Decimal>,
+    ) -> Result<(), AppError> {
+        // Simple dynamic query via COALESCE
+        // Since we're dealing with "if null dont change", COALESCE works if we pass NULL for None.
+        sqlx::query!(
+            r#"
+            UPDATE portfolio 
+            SET 
+                quantity = COALESCE($3, quantity), 
+                avg_buy_price = COALESCE($4, avg_buy_price),
+                last_updated = NOW()
+            WHERE user_id = $1 AND ticker = $2
+            "#,
+            user_id,
+            ticker,
+            quantity,
+            avg_buy_price
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 }
 

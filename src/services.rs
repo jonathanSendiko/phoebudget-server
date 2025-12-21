@@ -10,7 +10,7 @@ use crate::repository::{
 };
 use crate::schemas::{
     AuthResponse, CategorySummary, CreatePortfolioItem, CreateTransaction, FinancialHealth,
-    LoginRequest, RegisterRequest, Transaction,
+    LoginRequest, RegisterRequest, Transaction, UpdateInvestment, UserProfile,
 };
 
 use jsonwebtoken::{Header, encode};
@@ -97,6 +97,10 @@ impl AuthService {
 
         encode(&Header::default(), &claims, &get_keys().encoding)
             .map_err(|_| AppError::InternalServerError("Token creation failed".to_string()))
+    }
+
+    pub async fn get_profile(&self, user_id: Uuid) -> Result<UserProfile, AppError> {
+        self.user_repo.get_profile(user_id).await
     }
 }
 
@@ -340,6 +344,28 @@ impl FinanceService {
         }
         self.settings_repo
             .set_base_currency(user_id, &currency)
+            .await
+    }
+
+    pub async fn remove_investment(&self, user_id: Uuid, ticker: String) -> Result<(), AppError> {
+        let deleted = self.portfolio_repo.delete(user_id, &ticker).await?;
+        if deleted == 0 {
+            return Err(AppError::NotFoundError(format!(
+                "Investment {} not found",
+                ticker
+            )));
+        }
+        Ok(())
+    }
+
+    pub async fn update_investment(
+        &self,
+        user_id: Uuid,
+        ticker: String,
+        payload: UpdateInvestment,
+    ) -> Result<(), AppError> {
+        self.portfolio_repo
+            .update(user_id, &ticker, payload.quantity, payload.avg_buy_price)
             .await
     }
 }
