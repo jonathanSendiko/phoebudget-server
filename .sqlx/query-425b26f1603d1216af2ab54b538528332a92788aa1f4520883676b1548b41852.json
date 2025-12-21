@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM portfolio WHERE user_id = $1 AND ticker = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "425b26f1603d1216af2ab54b538528332a92788aa1f4520883676b1548b41852"
+}

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO assets (ticker, name, asset_type) VALUES ($1, $1, 'Stock') ON CONFLICT (ticker) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d1df6f6a92bf81dc892ed74376bdd36389743302cd340528396f12fa754ee7fe"
+}

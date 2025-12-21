@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO user_settings (user_id, base_currency)\n            VALUES ($1, $2)\n            ON CONFLICT (user_id) \n            DO UPDATE SET base_currency = EXCLUDED.base_currency\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "edead405ec6f00811dee7cd33fb22eb4d2c60f61aa9f25cc88f29730aef744f7"
+}
