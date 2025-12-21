@@ -10,7 +10,9 @@ if [ ! -f .env.prod ]; then
 fi
 
 echo "🔍 Loading environment variables..."
-export $(cat .env.prod | grep -v '#' | xargs)
+set -a
+source .env.prod
+set +a
 
 domains=($DOMAIN_NAME)
 rsa_key_size=4096

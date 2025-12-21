@@ -36,8 +36,8 @@ RUN apt-get update && apt-get install -y libssl-dev ca-certificates && rm -rf /v
 WORKDIR /app
 
 COPY --from=builder /app/target/release/phoebudget .
-# Copy the env file if you have it
-COPY .env .
+
+# COPY .env .
 
 EXPOSE 3000
 
