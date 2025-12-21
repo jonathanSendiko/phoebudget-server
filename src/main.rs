@@ -90,6 +90,12 @@ async fn main() {
         .await
         .expect("Failed to connect to database");
 
+    println!("Running database migrations...");
+    sqlx::migrate!()
+        .run(&pool)
+        .await
+        .expect("Failed to migrate database");
+
     let cache = moka::future::Cache::builder()
         .time_to_live(std::time::Duration::from_secs(3))
         .build();
