@@ -49,10 +49,10 @@ The `setup.sh` script will:
 To update the application after pushing new code:
 ```bash
 git pull
-docker-compose -f docker-compose.prod.yml build api
-docker-compose -f docker-compose.prod.yml up -d --no-deps api
+docker compose -f docker-compose.prod.yml build api
+docker compose -f docker-compose.prod.yml up -d --no-deps api
 ```
 
 ## Troubleshooting
 - **SSL Fails**: Ensure port 80 is open on your server's firewall (`sudo ufw allow 80`).
-- **DB Connection**: Check logs with `docker-compose -f docker-compose.prod.yml logs api`.
+- **DB Connection**: Check logs with `docker compose -f docker-compose.prod.yml logs api`.
