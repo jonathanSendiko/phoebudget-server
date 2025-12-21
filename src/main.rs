@@ -9,10 +9,49 @@ mod services;
 
 use axum::{
     Router,
+    body::Body,
+    extract::Request,
+    middleware::{self, Next},
+    response::Response,
     routing::{delete, get, post, put},
 };
+use http_body_util::BodyExt;
 use sqlx::postgres::PgPoolOptions;
 use std::net::SocketAddr;
+use tower_http::trace::TraceLayer;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+async fn print_request_body(
+    request: Request,
+    next: Next,
+) -> Result<Response, axum::http::StatusCode> {
+    let (parts, body) = request.into_parts();
+    let bytes = buffer_and_print("request", body).await?;
+    let req = Request::from_parts(parts, Body::from(bytes));
+    Ok(next.run(req).await)
+}
+
+async fn buffer_and_print<B>(
+    direction: &str,
+    body: B,
+) -> Result<bytes::Bytes, axum::http::StatusCode>
+where
+    B: axum::body::HttpBody<Data = bytes::Bytes>,
+    B::Error: std::fmt::Display,
+{
+    let bytes = match body.collect().await {
+        Ok(collected) => collected.to_bytes(),
+        Err(_err) => {
+            return Err(axum::http::StatusCode::BAD_REQUEST);
+        }
+    };
+
+    if let Ok(body_str) = std::str::from_utf8(&bytes) {
+        tracing::debug!("{} body = {:?}", direction, body_str);
+    }
+
+    Ok(bytes)
+}
 
 #[derive(Clone)]
 pub struct AppState {
@@ -22,6 +61,16 @@ pub struct AppState {
 #[tokio::main]
 async fn main() {
     dotenvy::dotenv().ok();
+
+    // Initialize tracing
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "phoebudget=info,tower_http=info".into()),
+        )
+        .with(tracing_subscriber::fmt::layer())
+        .init();
+
     let db_user = std::env::var("DB_USERNAME").expect("DB_USERNAME must be set");
     let db_password = std::env::var("DB_PASSWORD").expect("DB_PASSWORD must be set");
     let db_host = std::env::var("DB_HOST").expect("DB_HOST must be set");
@@ -70,6 +119,8 @@ async fn main() {
     let app = Router::new()
         .route("/", get(health_check))
         .nest("/api/v1", api_routes)
+        .layer(TraceLayer::new_for_http())
+        .layer(middleware::from_fn(print_request_body))
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
