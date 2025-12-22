@@ -297,7 +297,17 @@ impl PortfolioRepository {
         &self,
         user_id: Uuid,
     ) -> Result<Vec<(String, String, Decimal, Decimal, Decimal)>, AppError> {
-        let rows = sqlx::query!(
+        // Explicitly define the record type to satisfy the compiler
+        struct Row {
+            ticker: Option<String>,
+            name: String,
+            quantity: Decimal,
+            avg_buy_price: Decimal,
+            current_price: Option<Decimal>,
+        }
+
+        let rows = sqlx::query_as!(
+            Row,
             r#"
             SELECT 
                 p.ticker, 

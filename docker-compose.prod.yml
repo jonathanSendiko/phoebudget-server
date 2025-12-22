@@ -10,9 +10,7 @@ services:
       - POSTGRES_DB=${POSTGRES_DB}
     volumes:
       - postgres_prod_data:/var/lib/postgresql/data
-      # Still useful to have migrations if needed, but the app should handle migration on start ideally or via a separate job
-      # For now, we keep it consistent with the dev setup so it auto-inits if empty
-      - ./migrations:/docker-entrypoint-initdb.d
+      # - ./migrations:/docker-entrypoint-initdb.d # DISABLE THIS: The API now handles migrations!
     networks:
       - app_network
 
