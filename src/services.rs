@@ -123,17 +123,13 @@ impl TransactionService {
                 "Amount must be positive".to_string(),
             ));
         }
-        if req.description.trim().is_empty() {
-            return Err(AppError::ValidationError(
-                "Description cannot be empty".to_string(),
-            ));
-        }
+        let description = req.description.filter(|d| !d.trim().is_empty());
 
         self.transaction_repo
             .create(
                 user_id,
                 req.amount,
-                req.description,
+                description,
                 req.category_id,
                 req.occurred_at,
             )
@@ -179,20 +175,14 @@ impl TransactionService {
                 ));
             }
         }
-        if let Some(desc) = &req.description {
-            if desc.trim().is_empty() {
-                return Err(AppError::ValidationError(
-                    "Description cannot be empty".to_string(),
-                ));
-            }
-        }
+        let description = req.description.filter(|d| !d.trim().is_empty());
 
         self.transaction_repo
             .update(
                 id,
                 user_id,
                 req.amount,
-                req.description,
+                description,
                 req.category_id,
                 req.occurred_at,
             )

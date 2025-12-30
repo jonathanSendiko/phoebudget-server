@@ -89,7 +89,7 @@ impl TransactionRepository {
         &self,
         user_id: Uuid,
         amount: Decimal,
-        description: String,
+        description: Option<String>,
         category_id: i32,
         occurred_at: DateTime<Utc>,
     ) -> Result<Uuid, AppError> {
@@ -421,5 +421,12 @@ impl SettingsRepository {
             .fetch_optional(&self.pool)
             .await?;
         Ok(result.is_some())
+    }
+
+    pub async fn get_available_currencies(&self) -> Result<Vec<String>, AppError> {
+        let rows = sqlx::query!("SELECT code FROM currencies ORDER BY code")
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows.into_iter().map(|r| r.code).collect())
     }
 }

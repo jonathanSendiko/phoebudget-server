@@ -21,14 +21,21 @@ use std::net::SocketAddr;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-async fn print_request_body(
+async fn print_request_response(
     request: Request,
     next: Next,
 ) -> Result<Response, axum::http::StatusCode> {
     let (parts, body) = request.into_parts();
     let bytes = buffer_and_print("request", body).await?;
     let req = Request::from_parts(parts, Body::from(bytes));
-    Ok(next.run(req).await)
+
+    let res = next.run(req).await;
+
+    let (parts, body) = res.into_parts();
+    let bytes = buffer_and_print("response", body).await?;
+    let res = Response::from_parts(parts, Body::from(bytes));
+
+    Ok(res)
 }
 
 async fn buffer_and_print<B>(
@@ -117,6 +124,10 @@ async fn main() {
             put(handlers::update_transaction).delete(handlers::delete_transaction),
         )
         .route("/settings/currency", put(handlers::update_base_currency))
+        .route(
+            "/settings/currencies",
+            get(handlers::get_available_currencies),
+        )
         .route("/analysis/category", get(handlers::get_spending_analysis))
         .route("/analysis/net-worth", get(handlers::get_financial_health))
         .route("/portfolio/refresh", post(handlers::refresh_portfolio))
@@ -134,7 +145,7 @@ async fn main() {
         .route("/", get(health_check))
         .nest("/api/v1", api_routes)
         .layer(TraceLayer::new_for_http())
-        .layer(middleware::from_fn(print_request_body))
+        .layer(middleware::from_fn(print_request_response))
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));

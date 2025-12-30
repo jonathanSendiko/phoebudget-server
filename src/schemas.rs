@@ -18,7 +18,8 @@ where
 #[derive(Deserialize, Debug)]
 pub struct CreateTransaction {
     pub amount: Decimal,
-    pub description: String,
+    #[serde(default)]
+    pub description: Option<String>,
     pub category_id: i32,
     pub occurred_at: DateTime<Utc>,
 }
