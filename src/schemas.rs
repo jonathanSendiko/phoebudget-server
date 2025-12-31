@@ -13,6 +13,16 @@ where
     s.serialize_str(&x.round_dp(2).to_string())
 }
 
+fn round_currency_option<S>(x: &Option<Decimal>, s: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    match x {
+        Some(d) => round_currency(d, s),
+        None => s.serialize_none(),
+    }
+}
+
 // --- Request DTOs ---
 
 #[derive(Deserialize, Debug)]
@@ -22,6 +32,7 @@ pub struct CreateTransaction {
     pub description: Option<String>,
     pub category_id: i32,
     pub occurred_at: DateTime<Utc>,
+    pub currency_code: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -57,6 +68,21 @@ pub struct Transaction {
     pub category_id: Option<i32>,
     pub occurred_at: DateTime<Utc>,
     pub created_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Serialize, Debug)]
+pub struct TransactionDetail {
+    pub id: Uuid,
+    #[serde(serialize_with = "round_currency")]
+    pub amount: Decimal,
+    pub description: Option<String>,
+    pub category_id: Option<i32>,
+    pub occurred_at: DateTime<Utc>,
+    pub created_at: Option<DateTime<Utc>>,
+    pub original_currency: Option<String>,
+    #[serde(serialize_with = "round_currency_option", default)]
+    pub original_amount: Option<Decimal>,
+    pub exchange_rate: Option<Decimal>,
 }
 
 #[derive(Serialize)]
@@ -113,6 +139,9 @@ pub struct UpdateTransaction {
     pub description: Option<String>,
     pub category_id: Option<i32>,
     pub occurred_at: Option<DateTime<Utc>>,
+    pub original_currency: Option<String>,
+    pub original_amount: Option<Decimal>,
+    pub exchange_rate: Option<Decimal>,
 }
 
 #[derive(Deserialize, Debug)]

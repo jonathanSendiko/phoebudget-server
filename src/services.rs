@@ -10,7 +10,7 @@ use crate::repository::{
 };
 use crate::schemas::{
     AuthResponse, CategorySummary, CreatePortfolioItem, CreateTransaction, FinancialHealth,
-    LoginRequest, RegisterRequest, Transaction, UpdateInvestment, UserProfile,
+    LoginRequest, RegisterRequest, Transaction, TransactionDetail, UpdateInvestment, UserProfile,
 };
 
 use jsonwebtoken::{Header, encode};
@@ -106,11 +106,15 @@ impl AuthService {
 
 pub struct TransactionService {
     transaction_repo: TransactionRepository,
+    settings_repo: SettingsRepository,
 }
 
 impl TransactionService {
-    pub fn new(transaction_repo: TransactionRepository) -> Self {
-        Self { transaction_repo }
+    pub fn new(transaction_repo: TransactionRepository, settings_repo: SettingsRepository) -> Self {
+        Self {
+            transaction_repo,
+            settings_repo,
+        }
     }
 
     pub async fn create_transaction(
@@ -123,15 +127,38 @@ impl TransactionService {
                 "Amount must be positive".to_string(),
             ));
         }
+
+        let base_currency = self.settings_repo.get_base_currency(user_id).await?;
+        let (amount, original_currency, original_amount, exchange_rate) =
+            if let Some(currency) = &req.currency_code {
+                if currency != &base_currency {
+                    let rate = investments::fetch_exchange_rate(currency, &base_currency).await?;
+                    let converted_amount = req.amount * rate;
+                    (
+                        converted_amount,
+                        Some(currency.clone()),
+                        Some(req.amount),
+                        Some(rate),
+                    )
+                } else {
+                    (req.amount, None, None, None)
+                }
+            } else {
+                (req.amount, None, None, None)
+            };
+
         let description = req.description.filter(|d| !d.trim().is_empty());
 
         self.transaction_repo
             .create(
                 user_id,
-                req.amount,
+                amount,
                 description,
                 req.category_id,
                 req.occurred_at,
+                original_currency,
+                original_amount,
+                exchange_rate,
             )
             .await
     }
@@ -185,6 +212,9 @@ impl TransactionService {
                 description,
                 req.category_id,
                 req.occurred_at,
+                req.original_currency,
+                req.original_amount,
+                req.exchange_rate,
             )
             .await
     }
@@ -195,6 +225,13 @@ impl TransactionService {
             return Err(AppError::NotFoundError("Transaction not found".to_string()));
         }
         Ok(())
+    }
+    pub async fn get_transaction(
+        &self,
+        user_id: Uuid,
+        id: Uuid,
+    ) -> Result<TransactionDetail, AppError> {
+        self.transaction_repo.find_by_id(id, user_id).await
     }
 }
 

@@ -1,5 +1,7 @@
 use crate::error::AppError;
-use crate::schemas::{CategorySummary, CreatePortfolioItem, Transaction, User, UserProfile};
+use crate::schemas::{
+    CategorySummary, CreatePortfolioItem, Transaction, TransactionDetail, User, UserProfile,
+};
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use sqlx::PgPool;
@@ -92,18 +94,27 @@ impl TransactionRepository {
         description: Option<String>,
         category_id: i32,
         occurred_at: DateTime<Utc>,
+        original_currency: Option<String>,
+        original_amount: Option<Decimal>,
+        exchange_rate: Option<Decimal>,
     ) -> Result<Uuid, AppError> {
         let id = sqlx::query_scalar!(
             r#"
-            INSERT INTO transactions (amount, description, category_id, user_id, occurred_at)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO transactions (
+                amount, description, category_id, user_id, occurred_at,
+                original_currency, original_amount, exchange_rate
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING id
             "#,
             amount,
             description,
             category_id,
             user_id,
-            occurred_at
+            occurred_at,
+            original_currency,
+            original_amount,
+            exchange_rate
         )
         .fetch_one(&self.pool)
         .await?;
@@ -119,7 +130,8 @@ impl TransactionRepository {
         let rows = sqlx::query_as!(
             Transaction,
             r#"
-            SELECT id, amount, description, category_id, occurred_at, created_at 
+            SELECT 
+                id, amount, description, category_id, occurred_at, created_at
             FROM transactions
             WHERE user_id = $3 AND occurred_at BETWEEN $1 AND $2
             ORDER BY occurred_at DESC
@@ -131,6 +143,26 @@ impl TransactionRepository {
         .fetch_all(&self.pool)
         .await?;
         Ok(rows)
+    }
+
+    pub async fn find_by_id(&self, id: Uuid, user_id: Uuid) -> Result<TransactionDetail, AppError> {
+        let transaction = sqlx::query_as!(
+            TransactionDetail,
+            r#"
+            SELECT 
+                id, amount, description, category_id, occurred_at, created_at,
+                original_currency, original_amount, exchange_rate
+            FROM transactions
+            WHERE id = $1 AND user_id = $2
+            "#,
+            id,
+            user_id
+        )
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(AppError::NotFoundError("Transaction not found".to_string()))?;
+
+        Ok(transaction)
     }
 
     pub async fn get_spending_analysis(
@@ -168,6 +200,9 @@ impl TransactionRepository {
         description: Option<String>,
         category_id: Option<i32>,
         occurred_at: Option<DateTime<Utc>>,
+        original_currency: Option<String>,
+        original_amount: Option<Decimal>,
+        exchange_rate: Option<Decimal>,
     ) -> Result<(), AppError> {
         // Build dynamic query
         // simple way:
@@ -178,7 +213,10 @@ impl TransactionRepository {
                 amount = COALESCE($3, amount),
                 description = COALESCE($4, description),
                 category_id = COALESCE($5, category_id),
-                occurred_at = COALESCE($6, occurred_at)
+                occurred_at = COALESCE($6, occurred_at),
+                original_currency = COALESCE($7, original_currency),
+                original_amount = COALESCE($8, original_amount),
+                exchange_rate = COALESCE($9, exchange_rate)
             WHERE id = $1 AND user_id = $2
             "#,
             id,
@@ -186,7 +224,10 @@ impl TransactionRepository {
             amount,
             description,
             category_id,
-            occurred_at
+            occurred_at,
+            original_currency,
+            original_amount,
+            exchange_rate
         )
         .execute(&self.pool)
         .await?;

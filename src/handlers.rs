@@ -12,8 +12,8 @@ use crate::repository::{
 use crate::response::ApiResponse;
 use crate::schemas::{
     AuthResponse, CategorySummary, CreatePortfolioItem, CreateTransaction, DateRangeParams,
-    FinancialHealth, LoginRequest, RegisterRequest, Transaction, TransactionId, UpdateCurrency,
-    UpdateInvestment, UpdateTransaction, UserProfile,
+    FinancialHealth, LoginRequest, RegisterRequest, Transaction, TransactionDetail, TransactionId,
+    UpdateCurrency, UpdateInvestment, UpdateTransaction, UserProfile,
 };
 use crate::services::{AuthService, FinanceService, TransactionService};
 
@@ -66,7 +66,8 @@ pub async fn create_transaction(
     Json(payload): Json<CreateTransaction>,
 ) -> Result<Json<ApiResponse<TransactionId>>, AppError> {
     let transaction_repo = TransactionRepository::new(state.db.clone());
-    let service = TransactionService::new(transaction_repo);
+    let settings_repo = SettingsRepository::new(state.db.clone());
+    let service = TransactionService::new(transaction_repo, settings_repo);
 
     let id = service.create_transaction(user_id.0, payload).await?;
 
@@ -83,7 +84,8 @@ pub async fn update_transaction(
     Json(payload): Json<UpdateTransaction>,
 ) -> Result<Json<ApiResponse<String>>, AppError> {
     let transaction_repo = TransactionRepository::new(state.db.clone());
-    let service = TransactionService::new(transaction_repo);
+    let settings_repo = SettingsRepository::new(state.db.clone());
+    let service = TransactionService::new(transaction_repo, settings_repo);
 
     service
         .update_transaction(path.0, user_id.0, payload)
@@ -101,7 +103,8 @@ pub async fn delete_transaction(
     path: axum::extract::Path<uuid::Uuid>,
 ) -> Result<Json<ApiResponse<String>>, AppError> {
     let transaction_repo = TransactionRepository::new(state.db.clone());
-    let service = TransactionService::new(transaction_repo);
+    let settings_repo = SettingsRepository::new(state.db.clone());
+    let service = TransactionService::new(transaction_repo, settings_repo);
 
     service.delete_transaction(path.0, user_id.0).await?;
 
@@ -117,7 +120,8 @@ pub async fn get_transactions(
     Query(params): Query<DateRangeParams>,
 ) -> Result<Json<ApiResponse<Vec<Transaction>>>, AppError> {
     let transaction_repo = TransactionRepository::new(state.db.clone());
-    let service = TransactionService::new(transaction_repo);
+    let settings_repo = SettingsRepository::new(state.db.clone());
+    let service = TransactionService::new(transaction_repo, settings_repo);
 
     let rows = service
         .get_transactions(user_id.0, params.start_date, params.end_date)
@@ -126,13 +130,28 @@ pub async fn get_transactions(
     Ok(Json(ApiResponse::success(rows, None)))
 }
 
+pub async fn get_transaction(
+    State(state): State<AppState>,
+    user_id: UserId,
+    path: axum::extract::Path<uuid::Uuid>,
+) -> Result<Json<ApiResponse<TransactionDetail>>, AppError> {
+    let transaction_repo = TransactionRepository::new(state.db.clone());
+    let settings_repo = SettingsRepository::new(state.db.clone());
+    let service = TransactionService::new(transaction_repo, settings_repo);
+
+    let transaction = service.get_transaction(user_id.0, path.0).await?;
+
+    Ok(Json(ApiResponse::success(transaction, None)))
+}
+
 pub async fn get_spending_analysis(
     State(state): State<AppState>,
     user_id: UserId,
     Query(params): Query<DateRangeParams>,
 ) -> Result<Json<ApiResponse<Vec<CategorySummary>>>, AppError> {
     let transaction_repo = TransactionRepository::new(state.db.clone());
-    let service = TransactionService::new(transaction_repo);
+    let settings_repo = SettingsRepository::new(state.db.clone());
+    let service = TransactionService::new(transaction_repo, settings_repo);
 
     let rows = service
         .get_spending_analysis(user_id.0, params.start_date, params.end_date)

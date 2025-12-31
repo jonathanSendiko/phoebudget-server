@@ -121,7 +121,9 @@ async fn main() {
         )
         .route(
             "/transactions/{id}",
-            put(handlers::update_transaction).delete(handlers::delete_transaction),
+            put(handlers::update_transaction)
+                .delete(handlers::delete_transaction)
+                .get(handlers::get_transaction),
         )
         .route("/settings/currency", put(handlers::update_base_currency))
         .route(

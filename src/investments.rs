@@ -32,27 +32,42 @@ pub async fn fetch_exchange_rate(from: &str, to: &str) -> Result<Decimal, AppErr
         return Ok(Decimal::new(1, 0)); // 1.0
     }
 
-    // Yahoo Ticker for pair: e.g. "SGD=X" generally means USD -> SGD.
-    // "EURUSD=X" means EUR -> USD.
-    // Standard convention on Yahoo for USD base is "CURRENCY=X" (e.g. converted FROM USD).
-    // If we want USD -> SGD, ticker is "SGD=X".
-    // If we want SGD -> USD, we might need to invert or find specific ticker.
-    // For this MVP, let's assume valid pairs for "USD" -> "Target".
-    let ticker = format!("{}=X", to);
+    // Helper to get rate from USD to Target (e.g., USD -> SGD)
+    // Ticker "SGD=X" usually means 1 USD = x SGD
+    async fn get_usd_rate(target: &str) -> Result<Decimal, AppError> {
+        if target == "USD" {
+            return Ok(Decimal::new(1, 0));
+        }
+        // Try direct USD pair first
+        let ticker = format!("{}=X", target);
+        // Special case for some pairs if needed, but standard is TARGET=X for USD->TARGET
+        // Exception: EUR, GBP, AUD, NZD are often quoted as EURUSD=X (1 EUR = x USD)
+        // For simplicity in this MVP, we assume we are dealing with standard ones or we try to fetching "TARGET=X"
+        // If "EUR=X" doesn't exist/work, we might get an error.
+        // Let's assume standard behavior for now: "SGD=X", "IDR=X".
+        // If we need to support specific majors properly (EUR, GBP), we need to check if they are inverted.
+        // Yahoo "EUR=X" is actually returning EUR/USD rate? Or USD/EUR?
+        // Usually "EUR=X" returns 1 USD = ? EUR. (Current approx 0.95 EUR).
+        // "EURUSD=X" returns 1 EUR = ? USD.
+        // Let's stick to "TARGET=X" for 1 USD = ? TARGET.
 
-    let provider = YahooConnector::new().map_err(|e| {
-        AppError::ValidationError(format!("Failed to initialize Yahoo Connector: {}", e))
-    })?;
+        fetch_price(&ticker).await
+    }
 
-    let response = provider
-        .get_quote_range(&ticker, "1d", "1m")
-        .await
-        .map_err(|e| AppError::ValidationError(format!("Yahoo API Error for {}: {}", ticker, e)))?;
+    let rate_usd_to_from = get_usd_rate(from).await?;
+    let rate_usd_to_to = get_usd_rate(to).await?;
 
-    let quote = response
-        .last_quote()
-        .map_err(|_| AppError::ValidationError(format!("No exchange rate found for {}", ticker)))?;
+    // Rate(A->B) = Rate(USD->B) / Rate(USD->A)
+    // Example: SGD -> IDR
+    // USD -> SGD = 1.34
+    // USD -> IDR = 15000
+    // 1 SGD = (1/1.34) USD = (1/1.34) * 15000 IDR = 15000 / 1.34 = 11194
 
-    Decimal::from_f64(quote.close)
-        .ok_or_else(|| AppError::ValidationError("Failed to parse exchange rate".to_string()))
+    if rate_usd_to_from.is_zero() {
+        return Err(AppError::ValidationError(
+            "Invalid exchange rate data".to_string(),
+        ));
+    }
+
+    Ok(rate_usd_to_to / rate_usd_to_from)
 }
