@@ -30,7 +30,20 @@ pub async fn fetch_price(ticker: &str) -> Result<Decimal, AppError> {
     // If the user provided "BTC-USD" (Yahoo style), Binance might not like it.
     // But if they provided "ASTERUSDT" (Crypto style), Yahoo failed, so we try Binance.
     // We try the ticker as-is.
-    fetch_price_binance(ticker).await
+    match fetch_price_binance(ticker).await {
+        Ok(price) => return Ok(price),
+        Err(e) => {
+            tracing::warn!(
+                "Binance failed for {}: {:?}. Attempting CoinGecko...",
+                ticker,
+                e
+            );
+        }
+    }
+
+    // 3. Try CoinGecko (Last Resort for weird crypto like "umbra")
+    // NOTE: Ticker must be the CoinGecko ID (e.g. "umbra-network", "bitcoin")
+    fetch_price_coingecko(ticker).await
 }
 
 // Internal structs for Yahoo API response parsing
@@ -60,6 +73,16 @@ struct YahooErrorDetails {
 struct YahooMeta {
     #[serde(rename = "regularMarketPrice")]
     regular_market_price: f64,
+}
+
+// Internal structs for CoinGecko API response parsing
+// Response format: {"umbra-network": {"usd": 1.23}}
+#[derive(Deserialize, Debug)]
+struct CoinGeckoResponse(std::collections::HashMap<String, CoinGeckoPrice>);
+
+#[derive(Deserialize, Debug)]
+struct CoinGeckoPrice {
+    usd: f64,
 }
 
 async fn fetch_price_yahoo(ticker: &str) -> Result<Decimal, AppError> {
@@ -138,6 +161,42 @@ async fn fetch_price_binance(ticker: &str) -> Result<Decimal, AppError> {
             ticker_data.price
         ))
     })
+}
+
+async fn fetch_price_coingecko(ticker: &str) -> Result<Decimal, AppError> {
+    // API: https://api.coingecko.com/api/v3/simple/price?ids=umbra-network&vs_currencies=usd
+    // Ticker here is expected to be the CoinGecko ID (e.g. "umbra-network", "bitcoin")
+    // If the user passes "UMBRA", we might need to lowercase it, but CoinGecko IDs are Kebab-case usually.
+    // Let's assume user input is relatively raw or we lowercase it safely.
+    let id = ticker.to_lowercase();
+
+    let url = format!(
+        "https://api.coingecko.com/api/v3/simple/price?ids={}&vs_currencies=usd",
+        id
+    );
+
+    let client = reqwest::Client::new();
+    let resp = client.get(&url).send().await.map_err(|e| {
+        AppError::ValidationError(format!("CoinGecko API connection failed: {}", e))
+    })?;
+
+    if !resp.status().is_success() {
+        return Err(AppError::ValidationError(format!(
+            "CoinGecko API returned error: {}",
+            resp.status()
+        )));
+    }
+
+    let data: CoinGeckoResponse = resp.json().await.map_err(|e| {
+        AppError::ValidationError(format!("Failed to parse CoinGecko response: {}", e))
+    })?;
+
+    let price_item = data.0.get(&id).ok_or_else(|| {
+        AppError::ValidationError(format!("CoinGecko: No price found for ID '{}'", id))
+    })?;
+
+    Decimal::from_f64(price_item.usd)
+        .ok_or_else(|| AppError::ValidationError("Failed to parse CoinGecko price".to_string()))
 }
 
 // Internal structs for Frankfurter API response parsing
