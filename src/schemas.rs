@@ -175,3 +175,14 @@ pub struct AuthResponse {
     pub token: String,
     pub message: String,
 }
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Asset {
+    pub ticker: String,
+    pub name: String,
+    pub asset_type: String,
+    pub api_ticker: Option<String>,
+    pub source: Option<String>,
+    #[serde(serialize_with = "round_currency_option")]
+    pub current_price: Option<Decimal>,
+}

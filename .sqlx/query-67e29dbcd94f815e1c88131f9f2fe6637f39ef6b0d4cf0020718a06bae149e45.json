@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT \n                ticker, \n                name, \n                asset_type,\n                api_ticker,\n                source,\n                current_price\n            FROM assets\n            WHERE ticker = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "ticker",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "asset_type",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "api_ticker",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "source",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "current_price",
+        "type_info": "Numeric"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "67e29dbcd94f815e1c88131f9f2fe6637f39ef6b0d4cf0020718a06bae149e45"
+}

@@ -141,7 +141,8 @@ async fn main() {
         .route(
             "/portfolio",
             post(handlers::add_investment).get(handlers::get_portfolio),
-        );
+        )
+        .route("/assets", get(handlers::get_assets));
 
     let app = Router::new()
         .route("/", get(health_check))

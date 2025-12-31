@@ -298,13 +298,7 @@ impl FinanceService {
         // Validate ticker and ensure price is in assets table
         self.ensure_price_fresh(&item.ticker).await?;
 
-        // Ensure asset exists in DB (already done by update_asset_price if we did it right,
-        // but ensure_asset_exists handles the initial insert if not present)
-        // Actually fetch_price calls Yahoo, if valid we proceed.
-
-        self.portfolio_repo
-            .ensure_asset_exists(&item.ticker)
-            .await?;
+        // Ensure asset exists in DB (already done by seed data or we error out in add_item)
 
         match self.portfolio_repo.add_item(user_id, item.clone()).await {
             Ok(_) => Ok(()),
@@ -315,7 +309,7 @@ impl FinanceService {
                 if msg.contains("duplicate key value") {
                     Err(AppError::ValidationError(format!(
                         "{} is already in your portfolio",
-                        &item.ticker
+                        &item.ticker,
                     )))
                 } else {
                     Err(e)
@@ -332,21 +326,22 @@ impl FinanceService {
         }
         tracing::info!("Cache MISS for {}", ticker);
 
-        let price = investments::fetch_price(ticker).await?;
+        // Fetch asset from DB to know Source and API Ticker
+        let asset_opt = self.portfolio_repo.get_asset(ticker).await?;
+        let (api_ticker, source) = if let Some(asset) = asset_opt {
+            (
+                asset.api_ticker.unwrap_or(ticker.to_string()),
+                asset.source.unwrap_or("YAHOO".to_string()),
+            )
+        } else {
+            // If asset not found in DB, for now we default to YAHOO/Ticker
+            // (e.g. legacy behavior or if someone manually inserted via sql)
+            (ticker.to_string(), "YAHOO".to_string())
+        };
+
+        let price = investments::fetch_price_with_source(ticker, &api_ticker, &source).await?;
 
         // Update DB
-        // If asset doesn't exist, update_asset_price might list 0 rows affected if used strict update.
-        // But we usually ensure asset exists before.
-        // Let's assume asset exists or we act gracefully.
-        // Actually, for "Refresh", assets exist.
-        // For "Add", we call ensure_asset_exists first?
-        // Let's call ensure_asset_exists here if we want to be safe, or just update.
-        // PortfolioRepo::update_asset_price works on 'assets' table.
-        // If the asset isn't in 'assets' table, this does nothing.
-        // Optimization: Check DB first? No.
-
-        // We need to ensure the asset record exists to store the price.
-        self.portfolio_repo.ensure_asset_exists(ticker).await?;
         self.portfolio_repo
             .update_asset_price(ticker, price)
             .await?;
@@ -363,20 +358,16 @@ impl FinanceService {
         // Ensure prices are fresh first
         let tickers = self.portfolio_repo.get_tickers(user_id).await?;
         for ticker in tickers {
-            // We ignore errors here to allow partial success?
-            // Or we strictly fail if one price/API fails?
-            // "get investments... fetch from cache... avoiding race condition"
-            // Let's propagate error for now to be safe, or log it?
-            // Given fetch_price might fail if API is down, maybe we shouldn't block the UI?
-            // But user requirement implies we must fetch.
-            // Let's await properly.
-            self.ensure_price_fresh(&ticker).await?;
+            // We ignore errors here to allow partial success
+            if let Err(e) = self.ensure_price_fresh(&ticker).await {
+                tracing::error!("Failed to refresh price for {}: {:?}", ticker, e);
+            }
         }
 
         let raw_items = self.portfolio_repo.get_all_joined(user_id).await?;
         let mut summary_list = Vec::new();
 
-        for (ticker, name, quantity, avg_buy, current_price) in raw_items {
+        for (ticker, name, quantity, avg_buy, current_price, _source, _api_ticker) in raw_items {
             let total_value = quantity * current_price;
 
             // Calculate Change %

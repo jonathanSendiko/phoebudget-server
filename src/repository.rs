@@ -312,17 +312,45 @@ impl PortfolioRepository {
         Ok(())
     }
 
-    pub async fn ensure_asset_exists(&self, ticker: &str) -> Result<(), AppError> {
-        sqlx::query!(
-            "INSERT INTO assets (ticker, name, asset_type) VALUES ($1, $1, 'Stock') ON CONFLICT (ticker) DO NOTHING",
-            ticker
+    pub async fn get_all_assets(&self) -> Result<Vec<crate::schemas::Asset>, AppError> {
+        let rows = sqlx::query_as!(
+            crate::schemas::Asset,
+            r#"
+            SELECT 
+                ticker, 
+                name, 
+                asset_type,
+                api_ticker,
+                source,
+                current_price
+            FROM assets
+            ORDER BY name
+            "#
         )
-        .execute(&self.pool)
+        .fetch_all(&self.pool)
         .await?;
-        Ok(())
+        Ok(rows)
     }
 
     pub async fn add_item(&self, user_id: Uuid, item: CreatePortfolioItem) -> Result<(), AppError> {
+        // Ensure asset exists (in case user passes custom ticker not in DB)
+        // For MVP, if ticker doesn't exist, we error out or insert basic one.
+        // User wants "predetermined assets", so strict check is better,
+        // BUT for now let's leniently insert if missing (defaulting source to YAHOO) or error.
+        // Given the requirement "only allow user to use predetermined assets", we should probably Fail if not found.
+        // But to keep it simple and safe:
+        let asset_exists = sqlx::query!("SELECT ticker FROM assets WHERE ticker = $1", item.ticker)
+            .fetch_optional(&self.pool)
+            .await?
+            .is_some();
+
+        if !asset_exists {
+            return Err(AppError::ValidationError(format!(
+                "Asset '{}' not supported",
+                item.ticker
+            )));
+        }
+
         sqlx::query!(
             "INSERT INTO portfolio (user_id, ticker, quantity, avg_buy_price) VALUES ($1, $2, $3, $4)",
             user_id,
@@ -334,10 +362,22 @@ impl PortfolioRepository {
         .await?;
         Ok(())
     }
+
     pub async fn get_all_joined(
         &self,
         user_id: Uuid,
-    ) -> Result<Vec<(String, String, Decimal, Decimal, Decimal)>, AppError> {
+    ) -> Result<
+        Vec<(
+            String,
+            String,
+            Decimal,
+            Decimal,
+            Decimal,
+            Option<String>,
+            Option<String>,
+        )>,
+        AppError,
+    > {
         // Explicitly define the record type to satisfy the compiler
         struct Row {
             ticker: Option<String>,
@@ -345,6 +385,8 @@ impl PortfolioRepository {
             quantity: Decimal,
             avg_buy_price: Decimal,
             current_price: Option<Decimal>,
+            source: Option<String>,
+            api_ticker: Option<String>,
         }
 
         let rows = sqlx::query_as!(
@@ -355,7 +397,9 @@ impl PortfolioRepository {
                 a.name, 
                 p.quantity, 
                 p.avg_buy_price, 
-                a.current_price
+                a.current_price,
+                a.source,
+                a.api_ticker
             FROM portfolio p
             LEFT JOIN assets a ON p.ticker = a.ticker
             WHERE p.user_id = $1
@@ -375,12 +419,36 @@ impl PortfolioRepository {
                     r.quantity,
                     r.avg_buy_price,
                     r.current_price.unwrap_or(Decimal::ZERO),
+                    r.source,
+                    r.api_ticker,
                 )
             })
             .collect();
 
         Ok(result)
     }
+
+    pub async fn get_asset(&self, ticker: &str) -> Result<Option<crate::schemas::Asset>, AppError> {
+        let asset = sqlx::query_as!(
+            crate::schemas::Asset,
+            r#"
+            SELECT 
+                ticker, 
+                name, 
+                asset_type,
+                api_ticker,
+                source,
+                current_price
+            FROM assets
+            WHERE ticker = $1
+            "#,
+            ticker
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(asset)
+    }
+
     pub async fn delete(&self, user_id: Uuid, ticker: &str) -> Result<u64, AppError> {
         let result = sqlx::query!(
             "DELETE FROM portfolio WHERE user_id = $1 AND ticker = $2",

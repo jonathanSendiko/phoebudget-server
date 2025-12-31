@@ -10,40 +10,24 @@ struct BinanceTickerResponse {
     price: String,
 }
 
-pub async fn fetch_price(ticker: &str) -> Result<Decimal, AppError> {
-    // Strategy: Try Yahoo Finance first. If it fails, try Binance.
-
-    // 1. Try Yahoo Finance
-    match fetch_price_yahoo(ticker).await {
-        Ok(price) => return Ok(price),
-        Err(e) => {
-            tracing::warn!(
-                "Yahoo Finance failed for {}: {:?}. Attempting Binance...",
-                ticker,
-                e
-            );
+pub async fn fetch_price_with_source(
+    _ticker: &str, // Original ticker (e.g. BTC) - unused for fetching but good for logging
+    api_ticker: &str,
+    source: &str,
+) -> Result<Decimal, AppError> {
+    match source {
+        "YAHOO" => fetch_price_yahoo(api_ticker).await,
+        "BINANCE" => fetch_price_binance(api_ticker).await,
+        "COINGECKO" => fetch_price_coingecko(api_ticker).await,
+        _ => {
+            // Fallback or Error?
+            // "Invalid Source"
+            Err(AppError::ValidationError(format!(
+                "Unknown price source: {}",
+                source
+            )))
         }
     }
-
-    // 2. Try Binance
-    // Binance tickers are strictly uppercase and usually just the pair (e.g. BTCUSDT, ETHBTC).
-    // If the user provided "BTC-USD" (Yahoo style), Binance might not like it.
-    // But if they provided "ASTERUSDT" (Crypto style), Yahoo failed, so we try Binance.
-    // We try the ticker as-is.
-    match fetch_price_binance(ticker).await {
-        Ok(price) => return Ok(price),
-        Err(e) => {
-            tracing::warn!(
-                "Binance failed for {}: {:?}. Attempting CoinGecko...",
-                ticker,
-                e
-            );
-        }
-    }
-
-    // 3. Try CoinGecko (Last Resort for weird crypto like "umbra")
-    // NOTE: Ticker must be the CoinGecko ID (e.g. "umbra-network", "bitcoin")
-    fetch_price_coingecko(ticker).await
 }
 
 // Internal structs for Yahoo API response parsing
