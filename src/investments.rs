@@ -138,7 +138,6 @@ async fn fetch_price_binance(ticker: &str) -> Result<Decimal, AppError> {
         AppError::ValidationError(format!("Failed to parse Binance response: {}", e))
     })?;
 
-    // Binance returns price as "0.69300000" (String)
     ticker_data.price.parse::<Decimal>().map_err(|_| {
         AppError::ValidationError(format!(
             "Failed to parse Binance price '{}'",
@@ -148,10 +147,6 @@ async fn fetch_price_binance(ticker: &str) -> Result<Decimal, AppError> {
 }
 
 async fn fetch_price_coingecko(ticker: &str) -> Result<Decimal, AppError> {
-    // API: https://api.coingecko.com/api/v3/simple/price?ids=umbra-network&vs_currencies=usd
-    // Ticker here is expected to be the CoinGecko ID (e.g. "umbra-network", "bitcoin")
-    // If the user passes "UMBRA", we might need to lowercase it, but CoinGecko IDs are Kebab-case usually.
-    // Let's assume user input is relatively raw or we lowercase it safely.
     let id = ticker.to_lowercase();
 
     let url = format!(

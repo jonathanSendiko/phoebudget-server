@@ -1,0 +1,36 @@
+-- Add all currencies supported by Frankfurter API
+-- Source: https://api.frankfurter.dev/v1/currencies
+
+INSERT INTO currencies (code, symbol, name) VALUES 
+('AUD', 'A$', 'Australian Dollar'),
+('BGN', 'лв', 'Bulgarian Lev'),
+('BRL', 'R$', 'Brazilian Real'),
+('CAD', 'C$', 'Canadian Dollar'),
+('CHF', 'CHF', 'Swiss Franc'),
+('CNY', '¥', 'Chinese Renminbi Yuan'),
+('CZK', 'Kč', 'Czech Koruna'),
+('DKK', 'kr', 'Danish Krone'),
+('EUR', '€', 'Euro'),
+('GBP', '£', 'British Pound'),
+('HKD', 'HK$', 'Hong Kong Dollar'),
+('HUF', 'Ft', 'Hungarian Forint'),
+('IDR', 'Rp', 'Indonesian Rupiah'),
+('ILS', '₪', 'Israeli New Shekel'),
+('INR', '₹', 'Indian Rupee'),
+('ISK', 'kr', 'Icelandic Króna'),
+('JPY', '¥', 'Japanese Yen'),
+('KRW', '₩', 'South Korean Won'),
+('MXN', 'Mex$', 'Mexican Peso'),
+('MYR', 'RM', 'Malaysian Ringgit'),
+('NOK', 'kr', 'Norwegian Krone'),
+('NZD', 'NZ$', 'New Zealand Dollar'),
+('PHP', '₱', 'Philippine Peso'),
+('PLN', 'zł', 'Polish Złoty'),
+('RON', 'lei', 'Romanian Leu'),
+('SEK', 'kr', 'Swedish Krona'),
+('SGD', 'S$', 'Singapore Dollar'),
+('THB', '฿', 'Thai Baht'),
+('TRY', '₺', 'Turkish Lira'),
+('USD', '$', 'United States Dollar'),
+('ZAR', 'R', 'South African Rand')
+ON CONFLICT (code) DO NOTHING;
