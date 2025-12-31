@@ -1,73 +1,178 @@
 use crate::error::AppError;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::FromPrimitive; // Required for from_f64
-use yahoo_finance_api::YahooConnector;
+use serde::Deserialize;
+
+#[derive(Deserialize, Debug)]
+struct BinanceTickerResponse {
+    #[allow(dead_code)]
+    symbol: String,
+    price: String,
+}
 
 pub async fn fetch_price(ticker: &str) -> Result<Decimal, AppError> {
-    // 1. Initialize the provider
-    let provider = YahooConnector::new().map_err(|e| {
-        AppError::ValidationError(format!("Failed to initialize Yahoo Connector: {}", e))
+    // Strategy: Try Yahoo Finance first. If it fails, try Binance.
+
+    // 1. Try Yahoo Finance
+    match fetch_price_yahoo(ticker).await {
+        Ok(price) => return Ok(price),
+        Err(e) => {
+            tracing::warn!(
+                "Yahoo Finance failed for {}: {:?}. Attempting Binance...",
+                ticker,
+                e
+            );
+        }
+    }
+
+    // 2. Try Binance
+    // Binance tickers are strictly uppercase and usually just the pair (e.g. BTCUSDT, ETHBTC).
+    // If the user provided "BTC-USD" (Yahoo style), Binance might not like it.
+    // But if they provided "ASTERUSDT" (Crypto style), Yahoo failed, so we try Binance.
+    // We try the ticker as-is.
+    fetch_price_binance(ticker).await
+}
+
+// Internal structs for Yahoo API response parsing
+#[derive(Deserialize, Debug)]
+struct YahooResponse {
+    chart: YahooChart,
+}
+
+#[derive(Deserialize, Debug)]
+struct YahooChart {
+    result: Option<Vec<YahooResult>>,
+    error: Option<YahooErrorDetails>,
+}
+
+#[derive(Deserialize, Debug)]
+struct YahooResult {
+    meta: YahooMeta,
+}
+
+#[derive(Deserialize, Debug)]
+struct YahooErrorDetails {
+    code: String,
+    description: String,
+}
+
+#[derive(Deserialize, Debug)]
+struct YahooMeta {
+    #[serde(rename = "regularMarketPrice")]
+    regular_market_price: f64,
+}
+
+async fn fetch_price_yahoo(ticker: &str) -> Result<Decimal, AppError> {
+    let url = format!(
+        "https://query1.finance.yahoo.com/v8/finance/chart/{}?interval=1d&range=1m",
+        ticker
+    );
+
+    // use a standard browser user-agent to avoid 429/403
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        .build()
+        .map_err(|e| AppError::ValidationError(format!("Failed to build HTTP client: {}", e)))?;
+
+    let resp =
+        client.get(&url).send().await.map_err(|e| {
+            AppError::ValidationError(format!("Yahoo API connection failed: {}", e))
+        })?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(AppError::ValidationError(format!(
+            "Yahoo API returned error {}: {}",
+            status, text
+        )));
+    }
+
+    let yahoo_data: YahooResponse = resp
+        .json()
+        .await
+        .map_err(|e| AppError::ValidationError(format!("Failed to parse Yahoo response: {}", e)))?;
+
+    if let Some(err) = yahoo_data.chart.error {
+        return Err(AppError::ValidationError(format!(
+            "Yahoo API returned explicit error: {} - {}",
+            err.code, err.description
+        )));
+    }
+
+    let result = yahoo_data
+        .chart
+        .result
+        .and_then(|r| r.into_iter().next())
+        .ok_or_else(|| AppError::ValidationError(format!("No data found for {}", ticker)))?;
+
+    Decimal::from_f64(result.meta.regular_market_price)
+        .ok_or_else(|| AppError::ValidationError("Failed to parse price".to_string()))
+}
+
+async fn fetch_price_binance(ticker: &str) -> Result<Decimal, AppError> {
+    let url = format!(
+        "https://api.binance.com/api/v3/ticker/price?symbol={}",
+        ticker.to_uppercase()
+    );
+
+    let resp = reqwest::get(&url)
+        .await
+        .map_err(|e| AppError::ValidationError(format!("Binance API connection failed: {}", e)))?;
+
+    if !resp.status().is_success() {
+        return Err(AppError::ValidationError(format!(
+            "Binance API returned error for {}",
+            ticker
+        )));
+    }
+
+    let ticker_data: BinanceTickerResponse = resp.json().await.map_err(|e| {
+        AppError::ValidationError(format!("Failed to parse Binance response: {}", e))
     })?;
 
-    // 2. Request data: "1d" range (1 day), "1m" interval (1 minute)
-    // This gives us the most recent trading data.
-    let response = provider
-        .get_quote_range(ticker, "1d", "1m")
-        .await
-        .map_err(|e| AppError::ValidationError(format!("Yahoo API Error for {}: {}", ticker, e)))?;
+    // Binance returns price as "0.69300000" (String)
+    ticker_data.price.parse::<Decimal>().map_err(|_| {
+        AppError::ValidationError(format!(
+            "Failed to parse Binance price '{}'",
+            ticker_data.price
+        ))
+    })
+}
 
-    // 3. Extract the last available quote
-    let quote = response
-        .last_quote()
-        .map_err(|_| AppError::ValidationError(format!("No price data found for {}", ticker)))?;
-
-    // 4. Convert f64 (Float) to Decimal (Money Safe)
-    // Yahoo returns floats, but our DB uses Decimals.
-    Decimal::from_f64(quote.close)
-        .ok_or_else(|| AppError::ValidationError("Failed to parse price".to_string()))
+// Internal structs for Frankfurter API response parsing
+#[derive(Deserialize, Debug)]
+struct FrankfurterResponse {
+    rates: std::collections::HashMap<String, f64>,
 }
 
 pub async fn fetch_exchange_rate(from: &str, to: &str) -> Result<Decimal, AppError> {
     if from == to {
-        return Ok(Decimal::new(1, 0)); // 1.0
+        return Ok(Decimal::new(1, 0));
     }
 
-    // Helper to get rate from USD to Target (e.g., USD -> SGD)
-    // Ticker "SGD=X" usually means 1 USD = x SGD
-    async fn get_usd_rate(target: &str) -> Result<Decimal, AppError> {
-        if target == "USD" {
-            return Ok(Decimal::new(1, 0));
-        }
-        // Try direct USD pair first
-        let ticker = format!("{}=X", target);
-        // Special case for some pairs if needed, but standard is TARGET=X for USD->TARGET
-        // Exception: EUR, GBP, AUD, NZD are often quoted as EURUSD=X (1 EUR = x USD)
-        // For simplicity in this MVP, we assume we are dealing with standard ones or we try to fetching "TARGET=X"
-        // If "EUR=X" doesn't exist/work, we might get an error.
-        // Let's assume standard behavior for now: "SGD=X", "IDR=X".
-        // If we need to support specific majors properly (EUR, GBP), we need to check if they are inverted.
-        // Yahoo "EUR=X" is actually returning EUR/USD rate? Or USD/EUR?
-        // Usually "EUR=X" returns 1 USD = ? EUR. (Current approx 0.95 EUR).
-        // "EURUSD=X" returns 1 EUR = ? USD.
-        // Let's stick to "TARGET=X" for 1 USD = ? TARGET.
+    let url = format!("https://api.frankfurter.app/latest?from={}&to={}", from, to);
 
-        fetch_price(&ticker).await
+    let client = reqwest::Client::new();
+    let resp = client.get(&url).send().await.map_err(|e| {
+        AppError::ValidationError(format!("Frankfurter API connection failed: {}", e))
+    })?;
+
+    if !resp.status().is_success() {
+        return Err(AppError::ValidationError(format!(
+            "Frankfurter API returned error: {}",
+            resp.status()
+        )));
     }
 
-    let rate_usd_to_from = get_usd_rate(from).await?;
-    let rate_usd_to_to = get_usd_rate(to).await?;
+    let data: FrankfurterResponse = resp.json().await.map_err(|e| {
+        AppError::ValidationError(format!("Failed to parse Frankfurter response: {}", e))
+    })?;
 
-    // Rate(A->B) = Rate(USD->B) / Rate(USD->A)
-    // Example: SGD -> IDR
-    // USD -> SGD = 1.34
-    // USD -> IDR = 15000
-    // 1 SGD = (1/1.34) USD = (1/1.34) * 15000 IDR = 15000 / 1.34 = 11194
+    let rate = data.rates.get(to).ok_or_else(|| {
+        AppError::ValidationError(format!("No rate found for {} -> {}", from, to))
+    })?;
 
-    if rate_usd_to_from.is_zero() {
-        return Err(AppError::ValidationError(
-            "Invalid exchange rate data".to_string(),
-        ));
-    }
-
-    Ok(rate_usd_to_to / rate_usd_to_from)
+    Decimal::from_f64(*rate)
+        .ok_or_else(|| AppError::ValidationError("Failed to parse exchange rate".to_string()))
 }
