@@ -209,3 +209,10 @@ pub struct Asset {
     pub current_price: Option<Decimal>,
     pub icon_url: Option<String>,
 }
+
+#[derive(Serialize, Debug, sqlx::FromRow)]
+pub struct Category {
+    pub id: i32,
+    pub name: String,
+    pub is_income: bool,
+}

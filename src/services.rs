@@ -9,7 +9,7 @@ use crate::repository::{
     PortfolioRepository, SettingsRepository, TransactionRepository, UserRepository,
 };
 use crate::schemas::{
-    AuthResponse, CreatePortfolioItem, CreateTransaction, FinancialHealth, LoginRequest,
+    AuthResponse, Category, CreatePortfolioItem, CreateTransaction, FinancialHealth, LoginRequest,
     RegisterRequest, Transaction, TransactionDetail, UpdateInvestment, UserProfile,
 };
 
@@ -115,6 +115,10 @@ impl TransactionService {
             transaction_repo,
             settings_repo,
         }
+    }
+
+    pub async fn get_categories(&self) -> Result<Vec<Category>, AppError> {
+        self.transaction_repo.get_all_categories().await
     }
 
     pub async fn create_transaction(

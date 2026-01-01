@@ -11,9 +11,10 @@ use crate::repository::{
 };
 use crate::response::ApiResponse;
 use crate::schemas::{
-    AuthResponse, CreatePortfolioItem, CreateTransaction, DateRangeParams, FinancialHealth,
-    LoginRequest, RegisterRequest, SpendingAnalysisResponse, Transaction, TransactionDetail,
-    TransactionId, UpdateCurrency, UpdateInvestment, UpdateTransaction, UserProfile,
+    AuthResponse, Category, CreatePortfolioItem, CreateTransaction, DateRangeParams,
+    FinancialHealth, LoginRequest, RegisterRequest, SpendingAnalysisResponse, Transaction,
+    TransactionDetail, TransactionId, UpdateCurrency, UpdateInvestment, UpdateTransaction,
+    UserProfile,
 };
 use crate::services::{AuthService, FinanceService, TransactionService};
 
@@ -158,6 +159,19 @@ pub async fn get_spending_analysis(
         .await?;
 
     Ok(Json(ApiResponse::success(rows, None)))
+}
+
+pub async fn get_categories(
+    state: State<AppState>,
+    _user_id: UserId,
+) -> Result<Json<ApiResponse<Vec<Category>>>, AppError> {
+    let transaction_repo = TransactionRepository::new(state.db.clone());
+    let settings_repo = SettingsRepository::new(state.db.clone());
+    let service = TransactionService::new(transaction_repo, settings_repo);
+
+    let categories = service.get_categories().await?;
+
+    Ok(Json(ApiResponse::success(categories, None)))
 }
 
 pub async fn get_financial_health(

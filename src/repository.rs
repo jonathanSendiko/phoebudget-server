@@ -1,6 +1,7 @@
 use crate::error::AppError;
 use crate::schemas::{
-    CategorySummary, CreatePortfolioItem, Transaction, TransactionDetail, User, UserProfile,
+    Category, CategorySummary, CreatePortfolioItem, Transaction, TransactionDetail, User,
+    UserProfile,
 };
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
@@ -85,6 +86,20 @@ pub struct TransactionRepository {
 impl TransactionRepository {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
+    }
+
+    pub async fn get_all_categories(&self) -> Result<Vec<Category>, AppError> {
+        let categories = sqlx::query_as!(
+            Category,
+            r#"
+            SELECT id, name, COALESCE(is_income, FALSE) as "is_income!"
+            FROM categories
+            ORDER BY name ASC
+            "#
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(categories)
     }
 
     pub async fn create(

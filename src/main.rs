@@ -130,6 +130,7 @@ async fn main() {
             "/settings/currencies",
             get(handlers::get_available_currencies),
         )
+        .route("/categories", get(handlers::get_categories))
         .route("/analysis/category", get(handlers::get_spending_analysis))
         .route("/analysis/net-worth", get(handlers::get_financial_health))
         .route("/portfolio/refresh", post(handlers::refresh_portfolio))
