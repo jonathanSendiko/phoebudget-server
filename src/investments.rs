@@ -11,16 +11,17 @@ struct BinanceTickerResponse {
 }
 
 pub async fn fetch_price_with_source(
+    client: &reqwest::Client,
     _ticker: &str, // Original ticker (e.g. BTC) - unused for fetching but good for logging
     api_ticker: &str,
     source: &str,
 ) -> Result<(Decimal, String), AppError> {
     match source {
-        "YAHOO" => fetch_price_yahoo(api_ticker).await,
-        "BINANCE" => fetch_price_binance(api_ticker)
+        "YAHOO" => fetch_price_yahoo(client, api_ticker).await,
+        "BINANCE" => fetch_price_binance(client, api_ticker)
             .await
             .map(|p| (p, "USD".to_string())), // Assuming USDT
-        "COINGECKO" => fetch_price_coingecko(api_ticker)
+        "COINGECKO" => fetch_price_coingecko(client, api_ticker)
             .await
             .map(|p| (p, "USD".to_string())),
         _ => {
@@ -74,17 +75,14 @@ struct CoinGeckoPrice {
     usd: f64,
 }
 
-async fn fetch_price_yahoo(ticker: &str) -> Result<(Decimal, String), AppError> {
+async fn fetch_price_yahoo(
+    client: &reqwest::Client,
+    ticker: &str,
+) -> Result<(Decimal, String), AppError> {
     let url = format!(
         "https://query1.finance.yahoo.com/v8/finance/chart/{}?interval=1d&range=1m",
         ticker
     );
-
-    // use a standard browser user-agent to avoid 429/403
-    let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        .build()
-        .map_err(|e| AppError::ValidationError(format!("Failed to build HTTP client: {}", e)))?;
 
     let resp =
         client.get(&url).send().await.map_err(|e| {
@@ -126,15 +124,16 @@ async fn fetch_price_yahoo(ticker: &str) -> Result<(Decimal, String), AppError> 
     Ok((price, currency))
 }
 
-async fn fetch_price_binance(ticker: &str) -> Result<Decimal, AppError> {
+async fn fetch_price_binance(client: &reqwest::Client, ticker: &str) -> Result<Decimal, AppError> {
     let url = format!(
         "https://api.binance.com/api/v3/ticker/price?symbol={}",
         ticker.to_uppercase()
     );
 
-    let resp = reqwest::get(&url)
-        .await
-        .map_err(|e| AppError::ValidationError(format!("Binance API connection failed: {}", e)))?;
+    let resp =
+        client.get(&url).send().await.map_err(|e| {
+            AppError::ValidationError(format!("Binance API connection failed: {}", e))
+        })?;
 
     if !resp.status().is_success() {
         return Err(AppError::ValidationError(format!(
@@ -155,7 +154,10 @@ async fn fetch_price_binance(ticker: &str) -> Result<Decimal, AppError> {
     })
 }
 
-async fn fetch_price_coingecko(ticker: &str) -> Result<Decimal, AppError> {
+async fn fetch_price_coingecko(
+    client: &reqwest::Client,
+    ticker: &str,
+) -> Result<Decimal, AppError> {
     let id = ticker.to_lowercase();
 
     let url = format!(
@@ -163,7 +165,6 @@ async fn fetch_price_coingecko(ticker: &str) -> Result<Decimal, AppError> {
         id
     );
 
-    let client = reqwest::Client::new();
     let resp = client.get(&url).send().await.map_err(|e| {
         AppError::ValidationError(format!("CoinGecko API connection failed: {}", e))
     })?;
@@ -199,11 +200,13 @@ struct CoinGeckoImage {
 }
 
 /// Fetch icon URL from CoinGecko API for a given coin ID
-pub async fn fetch_coingecko_icon(coin_id: &str) -> Result<Option<String>, AppError> {
+pub async fn fetch_coingecko_icon(
+    client: &reqwest::Client,
+    coin_id: &str,
+) -> Result<Option<String>, AppError> {
     let id = coin_id.to_lowercase();
     let url = format!("https://api.coingecko.com/api/v3/coins/{}", id);
 
-    let client = reqwest::Client::new();
     let resp = client.get(&url).send().await.map_err(|e| {
         tracing::warn!("CoinGecko icon API connection failed for {}: {}", id, e);
         return AppError::ValidationError(format!("CoinGecko icon API connection failed: {}", e));
@@ -236,14 +239,17 @@ struct FrankfurterResponse {
     rates: std::collections::HashMap<String, f64>,
 }
 
-pub async fn fetch_exchange_rate(from: &str, to: &str) -> Result<Decimal, AppError> {
+pub async fn fetch_exchange_rate(
+    client: &reqwest::Client,
+    from: &str,
+    to: &str,
+) -> Result<Decimal, AppError> {
     if from == to {
         return Ok(Decimal::new(1, 0));
     }
 
     let url = format!("https://api.frankfurter.app/latest?from={}&to={}", from, to);
 
-    let client = reqwest::Client::new();
     let resp = client.get(&url).send().await.map_err(|e| {
         AppError::ValidationError(format!("Frankfurter API connection failed: {}", e))
     })?;

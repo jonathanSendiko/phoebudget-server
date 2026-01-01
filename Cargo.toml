@@ -32,3 +32,6 @@ async-trait = "0.1.89"
 moka = { version = "0.12", features = ["future"] }
 reqwest = { version = "0.12", features = ["json"] }
 futures = "0.3"
+
+[dev-dependencies]
+rust_decimal_macros = "1.36"

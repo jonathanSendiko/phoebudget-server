@@ -2,6 +2,7 @@ mod auth;
 mod error;
 mod handlers;
 mod investments;
+mod portfolio;
 mod repository;
 mod response;
 mod schemas;
@@ -65,6 +66,35 @@ pub struct AppState {
     pub db: sqlx::PgPool,
     pub price_cache: moka::future::Cache<String, rust_decimal::Decimal>,
     pub exchange_rate_cache: moka::future::Cache<String, rust_decimal::Decimal>,
+    pub http_client: reqwest::Client,
+}
+
+impl AppState {
+    pub fn auth_service(&self) -> services::AuthService {
+        services::AuthService::new(
+            repository::UserRepository::new(self.db.clone()),
+            repository::SettingsRepository::new(self.db.clone()),
+        )
+    }
+
+    pub fn transaction_service(&self) -> services::TransactionService {
+        services::TransactionService::new(
+            repository::TransactionRepository::new(self.db.clone()),
+            repository::SettingsRepository::new(self.db.clone()),
+            self.http_client.clone(),
+        )
+    }
+
+    pub fn finance_service(&self) -> services::FinanceService {
+        services::FinanceService::new(
+            repository::PortfolioRepository::new(self.db.clone()),
+            repository::TransactionRepository::new(self.db.clone()),
+            repository::SettingsRepository::new(self.db.clone()),
+            self.price_cache.clone(),
+            self.exchange_rate_cache.clone(),
+            self.http_client.clone(),
+        )
+    }
 }
 
 #[tokio::main]
@@ -112,10 +142,16 @@ async fn main() {
         .time_to_live(std::time::Duration::from_secs(60))
         .build();
 
+    let http_client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        .build()
+        .expect("Failed to build HTTP client");
+
     let state = AppState {
         db: pool,
         price_cache: cache,
         exchange_rate_cache,
+        http_client,
     };
 
     let api_routes = Router::new()

@@ -227,3 +227,17 @@ pub struct Category {
     pub is_income: bool,
     pub icon: String,
 }
+
+/// Internal struct for portfolio data joined with asset info (from repository)
+#[derive(Debug)]
+pub struct PortfolioJoinedRow {
+    pub ticker: String,
+    pub name: String,
+    pub quantity: Decimal,
+    pub avg_buy_price: Decimal,
+    pub current_price: Decimal,
+    pub source: Option<String>,
+    pub api_ticker: Option<String>,
+    pub currency: Option<String>,
+    pub icon_url: Option<String>,
+}

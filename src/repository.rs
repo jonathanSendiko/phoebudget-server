@@ -441,20 +441,7 @@ impl PortfolioRepository {
     pub async fn get_all_joined(
         &self,
         user_id: Uuid,
-    ) -> Result<
-        Vec<(
-            String,
-            String,
-            Decimal,
-            Decimal,
-            Decimal,
-            Option<String>,
-            Option<String>,
-            Option<String>,
-            Option<String>,
-        )>,
-        AppError,
-    > {
+    ) -> Result<Vec<crate::schemas::PortfolioJoinedRow>, AppError> {
         // Explicitly define the record type to satisfy the compiler
         struct Row {
             ticker: Option<String>,
@@ -490,21 +477,18 @@ impl PortfolioRepository {
         .fetch_all(&self.pool)
         .await?;
 
-        // Map results to a tuple.
         let result = rows
             .into_iter()
-            .map(|r| {
-                (
-                    r.ticker.unwrap_or_else(String::new),
-                    r.name,
-                    r.quantity,
-                    r.avg_buy_price,
-                    r.current_price.unwrap_or(Decimal::ZERO),
-                    r.source,
-                    r.api_ticker,
-                    r.currency,
-                    r.icon_url,
-                )
+            .map(|r| crate::schemas::PortfolioJoinedRow {
+                ticker: r.ticker.unwrap_or_default(),
+                name: r.name,
+                quantity: r.quantity,
+                avg_buy_price: r.avg_buy_price,
+                current_price: r.current_price.unwrap_or(Decimal::ZERO),
+                source: r.source,
+                api_ticker: r.api_ticker,
+                currency: r.currency,
+                icon_url: r.icon_url,
             })
             .collect();
 

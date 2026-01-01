@@ -107,13 +107,19 @@ impl AuthService {
 pub struct TransactionService {
     transaction_repo: TransactionRepository,
     settings_repo: SettingsRepository,
+    http_client: reqwest::Client,
 }
 
 impl TransactionService {
-    pub fn new(transaction_repo: TransactionRepository, settings_repo: SettingsRepository) -> Self {
+    pub fn new(
+        transaction_repo: TransactionRepository,
+        settings_repo: SettingsRepository,
+        http_client: reqwest::Client,
+    ) -> Self {
         Self {
             transaction_repo,
             settings_repo,
+            http_client,
         }
     }
 
@@ -133,23 +139,26 @@ impl TransactionService {
         }
 
         let base_currency = self.settings_repo.get_base_currency(user_id).await?;
-        let (amount, original_currency, original_amount, exchange_rate) =
-            if let Some(currency) = &req.currency_code {
-                if currency != &base_currency {
-                    let rate = investments::fetch_exchange_rate(currency, &base_currency).await?;
-                    let converted_amount = req.amount * rate;
-                    (
-                        converted_amount,
-                        Some(currency.clone()),
-                        Some(req.amount),
-                        Some(rate),
-                    )
-                } else {
-                    (req.amount, None, None, None)
-                }
+        let (amount, original_currency, original_amount, exchange_rate) = if let Some(currency) =
+            &req.currency_code
+        {
+            if currency != &base_currency {
+                let rate =
+                    investments::fetch_exchange_rate(&self.http_client, currency, &base_currency)
+                        .await?;
+                let converted_amount = req.amount * rate;
+                (
+                    converted_amount,
+                    Some(currency.clone()),
+                    Some(req.amount),
+                    Some(rate),
+                )
             } else {
                 (req.amount, None, None, None)
-            };
+            }
+        } else {
+            (req.amount, None, None, None)
+        };
 
         let description = req.description.filter(|d| !d.trim().is_empty());
 
@@ -266,6 +275,7 @@ pub struct FinanceService {
     settings_repo: SettingsRepository,
     price_cache: moka::future::Cache<String, Decimal>,
     exchange_rate_cache: moka::future::Cache<String, Decimal>,
+    http_client: reqwest::Client,
 }
 
 impl FinanceService {
@@ -275,6 +285,7 @@ impl FinanceService {
         settings_repo: SettingsRepository,
         price_cache: moka::future::Cache<String, Decimal>,
         exchange_rate_cache: moka::future::Cache<String, Decimal>,
+        http_client: reqwest::Client,
     ) -> Self {
         Self {
             portfolio_repo,
@@ -282,6 +293,7 @@ impl FinanceService {
             settings_repo,
             price_cache,
             exchange_rate_cache,
+            http_client,
         }
     }
 
@@ -298,7 +310,7 @@ impl FinanceService {
         }
 
         tracing::info!("Exchange rate cache MISS for {} -> {}", from, to);
-        let rate = investments::fetch_exchange_rate(from, to).await?;
+        let rate = investments::fetch_exchange_rate(&self.http_client, from, to).await?;
         self.exchange_rate_cache.insert(cache_key, rate).await;
         Ok(rate)
     }
@@ -309,7 +321,7 @@ impl FinanceService {
         let invested_usd = self.portfolio_repo.get_total_invested(user_id).await?;
 
         let rate = if base_currency != "USD" {
-            investments::fetch_exchange_rate("USD", &base_currency).await?
+            self.get_cached_exchange_rate("USD", &base_currency).await?
         } else {
             Decimal::new(1, 0)
         };
@@ -326,14 +338,19 @@ impl FinanceService {
 
     pub async fn refresh_portfolio(&self, user_id: Uuid) -> Result<u64, AppError> {
         let tickers = self.portfolio_repo.get_tickers(user_id).await?;
-        let mut updated_count = 0;
+        let count = tickers.len() as u64;
 
-        for ticker in tickers {
-            self.ensure_price_fresh(&ticker).await?;
-            updated_count += 1;
-        }
+        let fetch_futures: Vec<_> = tickers
+            .iter()
+            .map(|ticker| async move {
+                if let Err(e) = self.ensure_price_fresh(ticker).await {
+                    tracing::error!("Failed to refresh price for {}: {:?}", ticker, e);
+                }
+            })
+            .collect();
+        futures::future::join_all(fetch_futures).await;
 
-        Ok(updated_count)
+        Ok(count)
     }
 
     pub async fn add_investment(
@@ -373,7 +390,6 @@ impl FinanceService {
         tracing::info!("Cache MISS for {}", ticker);
 
         // Fetch asset from DB to know Source and API Ticker
-        // Fetch asset from DB to know Source and API Ticker
         let asset_opt = self.portfolio_repo.get_asset(ticker).await?;
         let (api_ticker, source) = if let Some(asset) = asset_opt {
             let api_ticker = asset.api_ticker.unwrap_or(ticker.to_string());
@@ -383,7 +399,7 @@ impl FinanceService {
             if asset.icon_url.is_none() && source == "COINGECKO" {
                 tracing::info!("Missing icon for {}, fetching from CoinGecko...", ticker);
                 // We don't want to fail the whole request if icon fetch fails
-                match investments::fetch_coingecko_icon(&api_ticker).await {
+                match investments::fetch_coingecko_icon(&self.http_client, &api_ticker).await {
                     Ok(Some(url)) => {
                         if let Err(e) = self.portfolio_repo.update_asset_icon(ticker, &url).await {
                             tracing::error!("Failed to save icon for {}: {:?}", ticker, e);
@@ -404,7 +420,8 @@ impl FinanceService {
         };
 
         let (price, currency) =
-            investments::fetch_price_with_source(ticker, &api_ticker, &source).await?;
+            investments::fetch_price_with_source(&self.http_client, ticker, &api_ticker, &source)
+                .await?;
 
         // Update DB
         self.portfolio_repo
@@ -440,19 +457,8 @@ impl FinanceService {
         let mut rate_cache: std::collections::HashMap<String, Decimal> =
             std::collections::HashMap::new();
 
-        for (
-            ticker,
-            name,
-            quantity,
-            avg_buy,
-            raw_current_price,
-            _source,
-            _api_ticker,
-            currency_opt,
-            icon_url,
-        ) in items
-        {
-            let asset_currency = currency_opt.unwrap_or_else(|| "USD".to_string());
+        for item in items {
+            let asset_currency = item.currency.unwrap_or_else(|| "USD".to_string());
             let rate = if asset_currency == base_currency {
                 Decimal::new(1, 0)
             } else if let Some(r) = rate_cache.get(&asset_currency) {
@@ -465,42 +471,43 @@ impl FinanceService {
                 r
             };
 
-            let current_price_native = raw_current_price;
-            let current_price_converted = raw_current_price * rate;
-            let avg_buy_converted = avg_buy * rate;
+            let current_price_native = item.current_price;
+            let current_price_converted = item.current_price * rate;
+            let avg_buy_converted = item.avg_buy_price * rate;
 
-            let total_value_native = quantity * current_price_native;
-            let total_value_converted = quantity * current_price_converted;
+            let total_value_native = item.quantity * current_price_native;
+            let total_value_converted = item.quantity * current_price_converted;
 
             // Cost in base currency for total calc
-            let cost_converted = quantity * avg_buy_converted;
-            let change_converted = (current_price_converted - avg_buy_converted) * quantity;
+            let cost_converted = item.quantity * avg_buy_converted;
+            let change_converted = (current_price_converted - avg_buy_converted) * item.quantity;
 
             // Accumulate totals (always in Base Currency)
             total_cost += cost_converted;
             absolute_change += change_converted;
 
             // Calculate Change % (based on native or converted - ratio is same)
-            let change_pct = if avg_buy > Decimal::ZERO {
-                ((current_price_native - avg_buy) / avg_buy) * Decimal::from(100)
+            let change_pct = if item.avg_buy_price > Decimal::ZERO {
+                ((current_price_native - item.avg_buy_price) / item.avg_buy_price)
+                    * Decimal::from(100)
             } else {
                 Decimal::ZERO
             };
 
             summary_list.push(crate::schemas::InvestmentSummary {
-                ticker: ticker.clone(),
-                name,
-                quantity,
-                avg_buy_price: avg_buy,                     // Native
+                ticker: item.ticker,
+                name: item.name,
+                quantity: item.quantity,
+                avg_buy_price: item.avg_buy_price, // Native
                 avg_buy_price_converted: avg_buy_converted, // Converted
-                current_price: current_price_native,        // Native
-                current_price_converted,                    // Converted
-                total_value: total_value_native,            // Native
-                total_value_converted,                      // Converted
+                current_price: current_price_native, // Native
+                current_price_converted,           // Converted
+                total_value: total_value_native,   // Native
+                total_value_converted,             // Converted
                 change_pct,
                 currency: base_currency.clone(),
                 asset_currency,
-                icon_url,
+                icon_url: item.icon_url,
             });
         }
 
