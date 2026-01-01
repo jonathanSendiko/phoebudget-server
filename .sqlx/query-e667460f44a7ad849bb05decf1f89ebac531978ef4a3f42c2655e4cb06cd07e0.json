@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT \n                p.ticker, \n                a.name, \n                p.quantity, \n                p.avg_buy_price, \n                a.current_price,\n                a.source,\n                a.api_ticker,\n                a.icon_url\n            FROM portfolio p\n            LEFT JOIN assets a ON p.ticker = a.ticker\n            WHERE p.user_id = $1\n            ",
+  "query": "\n            SELECT \n                p.ticker, \n                a.name, \n                p.quantity, \n                p.avg_buy_price, \n                a.current_price,\n                a.source,\n                a.api_ticker,\n                a.currency,\n                a.icon_url\n            FROM portfolio p\n            LEFT JOIN assets a ON p.ticker = a.ticker\n            WHERE p.user_id = $1\n            ",
   "describe": {
     "columns": [
       {
@@ -40,6 +40,11 @@
       },
       {
         "ordinal": 7,
+        "name": "currency",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 8,
         "name": "icon_url",
         "type_info": "Text"
       }
@@ -57,8 +62,9 @@
       true,
       true,
       true,
+      true,
       true
     ]
   },
-  "hash": "94def4baeff46d12369f5a56788e0dd15c6808210ba8ae5f2aa7e91578da6b49"
+  "hash": "e667460f44a7ad849bb05decf1f89ebac531978ef4a3f42c2655e4cb06cd07e0"
 }

@@ -357,10 +357,16 @@ impl PortfolioRepository {
         Ok(rows.into_iter().filter_map(|r| r.ticker).collect())
     }
 
-    pub async fn update_asset_price(&self, ticker: &str, price: Decimal) -> Result<(), AppError> {
+    pub async fn update_asset_price(
+        &self,
+        ticker: &str,
+        price: Decimal,
+        currency: &str,
+    ) -> Result<(), AppError> {
         sqlx::query!(
-            "UPDATE assets SET current_price = $1, last_updated = NOW() WHERE ticker = $2",
+            "UPDATE assets SET current_price = $1, currency = $2, last_updated = NOW() WHERE ticker = $3",
             price,
+            currency,
             ticker
         )
         .execute(&self.pool)
@@ -390,6 +396,7 @@ impl PortfolioRepository {
                 api_ticker,
                 source,
                 current_price,
+                currency,
                 icon_url
             FROM assets
             ORDER BY name
@@ -444,6 +451,7 @@ impl PortfolioRepository {
             Option<String>,
             Option<String>,
             Option<String>,
+            Option<String>,
         )>,
         AppError,
     > {
@@ -456,6 +464,7 @@ impl PortfolioRepository {
             current_price: Option<Decimal>,
             source: Option<String>,
             api_ticker: Option<String>,
+            currency: Option<String>,
             icon_url: Option<String>,
         }
 
@@ -470,6 +479,7 @@ impl PortfolioRepository {
                 a.current_price,
                 a.source,
                 a.api_ticker,
+                a.currency,
                 a.icon_url
             FROM portfolio p
             LEFT JOIN assets a ON p.ticker = a.ticker
@@ -492,6 +502,7 @@ impl PortfolioRepository {
                     r.current_price.unwrap_or(Decimal::ZERO),
                     r.source,
                     r.api_ticker,
+                    r.currency,
                     r.icon_url,
                 )
             })
@@ -510,6 +521,7 @@ impl PortfolioRepository {
                 asset_type,
                 api_ticker,
                 source,
+                currency,
                 current_price,
                 icon_url
             FROM assets

@@ -127,13 +127,21 @@ pub struct InvestmentSummary {
     #[serde(serialize_with = "round_currency")]
     pub quantity: Decimal,
     #[serde(serialize_with = "round_currency")]
-    pub avg_buy_price: Decimal,
+    pub avg_buy_price: Decimal, // Native
     #[serde(serialize_with = "round_currency")]
-    pub current_price: Decimal,
+    pub avg_buy_price_converted: Decimal, // Base
     #[serde(serialize_with = "round_currency")]
-    pub total_value: Decimal,
+    pub current_price: Decimal, // Native
+    #[serde(serialize_with = "round_currency")]
+    pub current_price_converted: Decimal, // Base
+    #[serde(serialize_with = "round_currency")]
+    pub total_value: Decimal, // Native
+    #[serde(serialize_with = "round_currency")]
+    pub total_value_converted: Decimal, // Base
     #[serde(serialize_with = "round_currency")]
     pub change_pct: Decimal,
+    pub currency: String,       // Base Currency
+    pub asset_currency: String, // Native Currency
     pub icon_url: Option<String>,
 }
 
@@ -208,6 +216,7 @@ pub struct Asset {
     pub source: Option<String>,
     #[serde(serialize_with = "round_currency_option")]
     pub current_price: Option<Decimal>,
+    pub currency: Option<String>,
     pub icon_url: Option<String>,
 }
 

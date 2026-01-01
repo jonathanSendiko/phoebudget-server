@@ -382,11 +382,12 @@ impl FinanceService {
             (ticker.to_string(), "YAHOO".to_string())
         };
 
-        let price = investments::fetch_price_with_source(ticker, &api_ticker, &source).await?;
+        let (price, currency) =
+            investments::fetch_price_with_source(ticker, &api_ticker, &source).await?;
 
         // Update DB
         self.portfolio_repo
-            .update_asset_price(ticker, price)
+            .update_asset_price(ticker, price, &currency)
             .await?;
 
         self.price_cache.insert(ticker.to_string(), price).await;
@@ -407,38 +408,72 @@ impl FinanceService {
             }
         }
 
-        let raw_items = self.portfolio_repo.get_all_joined(user_id).await?;
+        let base_currency = self.settings_repo.get_base_currency(user_id).await?;
+        let items = self.portfolio_repo.get_all_joined(user_id).await?;
         let mut summary_list = Vec::new();
         let mut total_cost = Decimal::ZERO;
         let mut absolute_change = Decimal::ZERO;
+        let mut rate_cache: std::collections::HashMap<String, Decimal> =
+            std::collections::HashMap::new();
 
-        for (ticker, name, quantity, avg_buy, current_price, _source, _api_ticker, icon_url) in
-            raw_items
+        for (
+            ticker,
+            name,
+            quantity,
+            avg_buy,
+            raw_current_price,
+            _source,
+            _api_ticker,
+            currency_opt,
+            icon_url,
+        ) in items
         {
-            let total_value = quantity * current_price;
-            let cost = quantity * avg_buy;
-            let change = (current_price - avg_buy) * quantity;
+            let asset_currency = currency_opt.unwrap_or_else(|| "USD".to_string());
+            let rate = if asset_currency == base_currency {
+                Decimal::new(1, 0)
+            } else if let Some(r) = rate_cache.get(&asset_currency) {
+                *r
+            } else {
+                let r = investments::fetch_exchange_rate(&asset_currency, &base_currency).await?;
+                rate_cache.insert(asset_currency.clone(), r);
+                r
+            };
 
-            // Accumulate totals
-            total_cost += cost;
-            absolute_change += change;
+            let current_price_native = raw_current_price;
+            let current_price_converted = raw_current_price * rate;
+            let avg_buy_converted = avg_buy * rate;
 
-            // Calculate Change %
-            // If avg_buy is 0 (shouldn't happen properly but safety first), change is 0.
+            let total_value_native = quantity * current_price_native;
+            let total_value_converted = quantity * current_price_converted;
+
+            // Cost in base currency for total calc
+            let cost_converted = quantity * avg_buy_converted;
+            let change_converted = (current_price_converted - avg_buy_converted) * quantity;
+
+            // Accumulate totals (always in Base Currency)
+            total_cost += cost_converted;
+            absolute_change += change_converted;
+
+            // Calculate Change % (based on native or converted - ratio is same)
             let change_pct = if avg_buy > Decimal::ZERO {
-                ((current_price - avg_buy) / avg_buy) * Decimal::from(100)
+                ((current_price_native - avg_buy) / avg_buy) * Decimal::from(100)
             } else {
                 Decimal::ZERO
             };
 
             summary_list.push(crate::schemas::InvestmentSummary {
-                ticker,
+                ticker: ticker.clone(),
                 name,
                 quantity,
-                avg_buy_price: avg_buy,
-                current_price,
-                total_value,
+                avg_buy_price: avg_buy,                     // Native
+                avg_buy_price_converted: avg_buy_converted, // Converted
+                current_price: current_price_native,        // Native
+                current_price_converted,                    // Converted
+                total_value: total_value_native,            // Native
+                total_value_converted,                      // Converted
                 change_pct,
+                currency: base_currency.clone(),
+                asset_currency,
                 icon_url,
             });
         }

@@ -14,11 +14,15 @@ pub async fn fetch_price_with_source(
     _ticker: &str, // Original ticker (e.g. BTC) - unused for fetching but good for logging
     api_ticker: &str,
     source: &str,
-) -> Result<Decimal, AppError> {
+) -> Result<(Decimal, String), AppError> {
     match source {
         "YAHOO" => fetch_price_yahoo(api_ticker).await,
-        "BINANCE" => fetch_price_binance(api_ticker).await,
-        "COINGECKO" => fetch_price_coingecko(api_ticker).await,
+        "BINANCE" => fetch_price_binance(api_ticker)
+            .await
+            .map(|p| (p, "USD".to_string())), // Assuming USDT
+        "COINGECKO" => fetch_price_coingecko(api_ticker)
+            .await
+            .map(|p| (p, "USD".to_string())),
         _ => {
             // Fallback or Error?
             // "Invalid Source"
@@ -57,6 +61,7 @@ struct YahooErrorDetails {
 struct YahooMeta {
     #[serde(rename = "regularMarketPrice")]
     regular_market_price: f64,
+    currency: Option<String>,
 }
 
 // Internal structs for CoinGecko API response parsing
@@ -69,7 +74,7 @@ struct CoinGeckoPrice {
     usd: f64,
 }
 
-async fn fetch_price_yahoo(ticker: &str) -> Result<Decimal, AppError> {
+async fn fetch_price_yahoo(ticker: &str) -> Result<(Decimal, String), AppError> {
     let url = format!(
         "https://query1.finance.yahoo.com/v8/finance/chart/{}?interval=1d&range=1m",
         ticker
@@ -113,8 +118,12 @@ async fn fetch_price_yahoo(ticker: &str) -> Result<Decimal, AppError> {
         .and_then(|r| r.into_iter().next())
         .ok_or_else(|| AppError::ValidationError(format!("No data found for {}", ticker)))?;
 
-    Decimal::from_f64(result.meta.regular_market_price)
-        .ok_or_else(|| AppError::ValidationError("Failed to parse price".to_string()))
+    let price = Decimal::from_f64(result.meta.regular_market_price)
+        .ok_or_else(|| AppError::ValidationError("Failed to parse price".to_string()))?;
+
+    let currency = result.meta.currency.unwrap_or_else(|| "USD".to_string());
+
+    Ok((price, currency))
 }
 
 async fn fetch_price_binance(ticker: &str) -> Result<Decimal, AppError> {
