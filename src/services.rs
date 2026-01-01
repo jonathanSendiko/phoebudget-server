@@ -449,73 +449,31 @@ impl FinanceService {
             .collect();
         futures::future::join_all(fetch_futures).await;
 
+        // Get data
         let base_currency = self.settings_repo.get_base_currency(user_id).await?;
         let items = self.portfolio_repo.get_all_joined(user_id).await?;
-        let mut summary_list = Vec::new();
-        let mut total_cost = Decimal::ZERO;
-        let mut absolute_change = Decimal::ZERO;
-        let mut rate_cache: std::collections::HashMap<String, Decimal> =
-            std::collections::HashMap::new();
 
-        for item in items {
-            let asset_currency = item.currency.unwrap_or_else(|| "USD".to_string());
-            let rate = if asset_currency == base_currency {
-                Decimal::new(1, 0)
-            } else if let Some(r) = rate_cache.get(&asset_currency) {
-                *r
-            } else {
-                let r = self
-                    .get_cached_exchange_rate(&asset_currency, &base_currency)
-                    .await?;
-                rate_cache.insert(asset_currency.clone(), r);
-                r
-            };
+        // Pre-fetch all unique exchange rates (async part)
+        let unique_currencies: std::collections::HashSet<String> = items
+            .iter()
+            .filter_map(|item| item.currency.clone())
+            .filter(|c| c != &base_currency)
+            .collect();
 
-            let current_price_native = item.current_price;
-            let current_price_converted = item.current_price * rate;
-            let avg_buy_converted = item.avg_buy_price * rate;
-
-            let total_value_native = item.quantity * current_price_native;
-            let total_value_converted = item.quantity * current_price_converted;
-
-            // Cost in base currency for total calc
-            let cost_converted = item.quantity * avg_buy_converted;
-            let change_converted = (current_price_converted - avg_buy_converted) * item.quantity;
-
-            // Accumulate totals (always in Base Currency)
-            total_cost += cost_converted;
-            absolute_change += change_converted;
-
-            // Calculate Change % (based on native or converted - ratio is same)
-            let change_pct = if item.avg_buy_price > Decimal::ZERO {
-                ((current_price_native - item.avg_buy_price) / item.avg_buy_price)
-                    * Decimal::from(100)
-            } else {
-                Decimal::ZERO
-            };
-
-            summary_list.push(crate::schemas::InvestmentSummary {
-                ticker: item.ticker,
-                name: item.name,
-                quantity: item.quantity,
-                avg_buy_price: item.avg_buy_price, // Native
-                avg_buy_price_converted: avg_buy_converted, // Converted
-                current_price: current_price_native, // Native
-                current_price_converted,           // Converted
-                total_value: total_value_native,   // Native
-                total_value_converted,             // Converted
-                change_pct,
-                currency: base_currency.clone(),
-                asset_currency,
-                icon_url: item.icon_url,
-            });
+        let mut exchange_rates = std::collections::HashMap::new();
+        for currency in unique_currencies {
+            let rate = self
+                .get_cached_exchange_rate(&currency, &base_currency)
+                .await?;
+            exchange_rates.insert(currency, rate);
         }
 
-        Ok(crate::schemas::PortfolioResponse {
-            investments: summary_list,
-            total_cost,
-            absolute_change,
-        })
+        // Use tested pure function to build the full response
+        Ok(crate::portfolio::build_portfolio_response(
+            items,
+            &exchange_rates,
+            &base_currency,
+        ))
     }
     pub async fn update_base_currency(
         &self,
