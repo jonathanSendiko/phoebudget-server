@@ -92,7 +92,7 @@ impl TransactionRepository {
         let categories = sqlx::query_as!(
             Category,
             r#"
-            SELECT id, name, COALESCE(is_income, FALSE) as "is_income!"
+            SELECT id, name, COALESCE(is_income, FALSE) as "is_income!", COALESCE(icon, 'help_outline') as "icon!"
             FROM categories
             ORDER BY name ASC
             "#
@@ -192,11 +192,12 @@ impl TransactionRepository {
             SELECT 
                 c.name as category, 
                 COALESCE(SUM(t.amount), 0) as "total!",
-                COALESCE(c.is_income, FALSE) as "is_income!"
+                COALESCE(c.is_income, FALSE) as "is_income!",
+                COALESCE(c.icon, 'help_outline') as "icon!"
             FROM transactions t
             JOIN categories c ON t.category_id = c.id
             WHERE t.user_id = $3 AND t.occurred_at BETWEEN $1 AND $2
-            GROUP BY c.name, c.is_income
+            GROUP BY c.name, c.is_income, c.icon
             ORDER BY 2 DESC
             "#,
             start_date,

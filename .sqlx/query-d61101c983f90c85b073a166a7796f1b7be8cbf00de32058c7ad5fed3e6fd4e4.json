@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT id, name, COALESCE(is_income, FALSE) as \"is_income!\"\n            FROM categories\n            ORDER BY name ASC\n            ",
+  "query": "\n            SELECT id, name, COALESCE(is_income, FALSE) as \"is_income!\", COALESCE(icon, 'help_outline') as \"icon!\"\n            FROM categories\n            ORDER BY name ASC\n            ",
   "describe": {
     "columns": [
       {
@@ -17,6 +17,11 @@
         "ordinal": 2,
         "name": "is_income!",
         "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "icon!",
+        "type_info": "Varchar"
       }
     ],
     "parameters": {
@@ -25,8 +30,9 @@
     "nullable": [
       false,
       false,
+      null,
       null
     ]
   },
-  "hash": "0fc55434ebecbacecf50faee8d2ab982419a8020349282cabeffc08832d49661"
+  "hash": "d61101c983f90c85b073a166a7796f1b7be8cbf00de32058c7ad5fed3e6fd4e4"
 }

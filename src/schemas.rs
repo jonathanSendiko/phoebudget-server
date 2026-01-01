@@ -96,6 +96,7 @@ pub struct CategorySummary {
     #[serde(serialize_with = "round_currency")]
     pub total: Decimal,
     pub is_income: bool,
+    pub icon: String,
 }
 
 #[derive(Serialize, Debug)]
@@ -215,4 +216,5 @@ pub struct Category {
     pub id: i32,
     pub name: String,
     pub is_income: bool,
+    pub icon: String,
 }

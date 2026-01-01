@@ -8,7 +8,7 @@ services:
       - POSTGRES_PASSWORD=password
       - POSTGRES_DB=phoebudget
     ports:
-      - "5432:5432" # Expose port locally so you can still inspect with a GUI tool
+      - "5433:5432" # Expose port locally so you can still inspect with a GUI tool
     volumes:
       - postgres_data:/var/lib/postgresql/data
       # - ./migrations:/docker-entrypoint-initdb.d # DISABLE THIS: The API now handles migrations!
