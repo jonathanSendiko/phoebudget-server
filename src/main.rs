@@ -64,6 +64,7 @@ where
 pub struct AppState {
     pub db: sqlx::PgPool,
     pub price_cache: moka::future::Cache<String, rust_decimal::Decimal>,
+    pub exchange_rate_cache: moka::future::Cache<String, rust_decimal::Decimal>,
 }
 
 #[tokio::main]
@@ -107,9 +108,14 @@ async fn main() {
         .time_to_live(std::time::Duration::from_secs(3))
         .build();
 
+    let exchange_rate_cache = moka::future::Cache::builder()
+        .time_to_live(std::time::Duration::from_secs(60))
+        .build();
+
     let state = AppState {
         db: pool,
         price_cache: cache,
+        exchange_rate_cache,
     };
 
     let api_routes = Router::new()

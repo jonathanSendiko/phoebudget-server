@@ -265,6 +265,7 @@ pub struct FinanceService {
     transaction_repo: TransactionRepository,
     settings_repo: SettingsRepository,
     price_cache: moka::future::Cache<String, Decimal>,
+    exchange_rate_cache: moka::future::Cache<String, Decimal>,
 }
 
 impl FinanceService {
@@ -273,13 +274,33 @@ impl FinanceService {
         transaction_repo: TransactionRepository,
         settings_repo: SettingsRepository,
         price_cache: moka::future::Cache<String, Decimal>,
+        exchange_rate_cache: moka::future::Cache<String, Decimal>,
     ) -> Self {
         Self {
             portfolio_repo,
             transaction_repo,
             settings_repo,
             price_cache,
+            exchange_rate_cache,
         }
+    }
+
+    /// Cached exchange rate lookup with 60s TTL
+    async fn get_cached_exchange_rate(&self, from: &str, to: &str) -> Result<Decimal, AppError> {
+        if from == to {
+            return Ok(Decimal::new(1, 0));
+        }
+
+        let cache_key = format!("{}_{}", from, to);
+        if let Some(rate) = self.exchange_rate_cache.get(&cache_key).await {
+            tracing::info!("Exchange rate cache HIT for {} -> {}", from, to);
+            return Ok(rate);
+        }
+
+        tracing::info!("Exchange rate cache MISS for {} -> {}", from, to);
+        let rate = investments::fetch_exchange_rate(from, to).await?;
+        self.exchange_rate_cache.insert(cache_key, rate).await;
+        Ok(rate)
     }
 
     pub async fn get_financial_health(&self, user_id: Uuid) -> Result<FinancialHealth, AppError> {
@@ -399,14 +420,17 @@ impl FinanceService {
         &self,
         user_id: Uuid,
     ) -> Result<crate::schemas::PortfolioResponse, AppError> {
-        // Ensure prices are fresh first
+        // Fetch prices in parallel for all tickers
         let tickers = self.portfolio_repo.get_tickers(user_id).await?;
-        for ticker in tickers {
-            // We ignore errors here to allow partial success
-            if let Err(e) = self.ensure_price_fresh(&ticker).await {
-                tracing::error!("Failed to refresh price for {}: {:?}", ticker, e);
-            }
-        }
+        let fetch_futures: Vec<_> = tickers
+            .iter()
+            .map(|ticker| async move {
+                if let Err(e) = self.ensure_price_fresh(ticker).await {
+                    tracing::error!("Failed to refresh price for {}: {:?}", ticker, e);
+                }
+            })
+            .collect();
+        futures::future::join_all(fetch_futures).await;
 
         let base_currency = self.settings_repo.get_base_currency(user_id).await?;
         let items = self.portfolio_repo.get_all_joined(user_id).await?;
@@ -434,7 +458,9 @@ impl FinanceService {
             } else if let Some(r) = rate_cache.get(&asset_currency) {
                 *r
             } else {
-                let r = investments::fetch_exchange_rate(&asset_currency, &base_currency).await?;
+                let r = self
+                    .get_cached_exchange_rate(&asset_currency, &base_currency)
+                    .await?;
                 rate_cache.insert(asset_currency.clone(), r);
                 r
             };

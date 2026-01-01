@@ -187,6 +187,7 @@ pub async fn get_financial_health(
         transaction_repo,
         settings_repo,
         state.price_cache.clone(),
+        state.exchange_rate_cache.clone(),
     );
 
     let health = service.get_financial_health(user_id.0).await?;
@@ -207,6 +208,7 @@ pub async fn refresh_portfolio(
         transaction_repo,
         settings_repo,
         state.price_cache.clone(),
+        state.exchange_rate_cache.clone(),
     );
 
     let updated_count = service.refresh_portfolio(user_id.0).await?;
@@ -231,6 +233,7 @@ pub async fn add_investment(
         transaction_repo,
         settings_repo,
         state.price_cache.clone(),
+        state.exchange_rate_cache.clone(),
     );
     let ticker = payload.ticker.clone();
 
@@ -255,6 +258,7 @@ pub async fn get_portfolio(
         transaction_repo,
         settings_repo,
         state.price_cache.clone(),
+        state.exchange_rate_cache.clone(),
     );
     let summary = service.get_portfolio_list(user_id.0).await?;
 
@@ -275,6 +279,7 @@ pub async fn update_base_currency(
         transaction_repo,
         settings_repo,
         state.price_cache.clone(),
+        state.exchange_rate_cache.clone(),
     );
 
     service
@@ -301,6 +306,7 @@ pub async fn remove_investment(
         transaction_repo,
         settings_repo,
         state.price_cache.clone(),
+        state.exchange_rate_cache.clone(),
     );
     service.remove_investment(user_id.0, path.0).await?;
 
@@ -325,6 +331,7 @@ pub async fn update_investment(
         transaction_repo,
         settings_repo,
         state.price_cache.clone(),
+        state.exchange_rate_cache.clone(),
     );
     service
         .update_investment(user_id.0, path.0, payload)
