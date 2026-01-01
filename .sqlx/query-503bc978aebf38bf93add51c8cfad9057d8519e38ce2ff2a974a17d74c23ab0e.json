@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO transactions (\n                amount, description, category_id, user_id, occurred_at,\n                original_currency, original_amount, exchange_rate, pocket_id\n            )\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)\n            RETURNING id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Numeric",
+        "Text",
+        "Int4",
+        "Uuid",
+        "Timestamptz",
+        "Varchar",
+        "Numeric",
+        "Numeric",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "503bc978aebf38bf93add51c8cfad9057d8519e38ce2ff2a974a17d74c23ab0e"
+}

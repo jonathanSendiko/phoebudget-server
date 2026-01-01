@@ -1,7 +1,7 @@
 use crate::error::AppError;
 use crate::schemas::{
-    Category, CategorySummary, CreatePortfolioItem, Transaction, TransactionDetail, User,
-    UserProfile,
+    Category, CategorySummary, CreatePortfolioItem, Pocket, PocketSummary, Transaction,
+    TransactionDetail, User, UserProfile,
 };
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
@@ -112,14 +112,15 @@ impl TransactionRepository {
         original_currency: Option<String>,
         original_amount: Option<Decimal>,
         exchange_rate: Option<Decimal>,
+        pocket_id: Uuid,
     ) -> Result<Uuid, AppError> {
         let id = sqlx::query_scalar!(
             r#"
             INSERT INTO transactions (
                 amount, description, category_id, user_id, occurred_at,
-                original_currency, original_amount, exchange_rate
+                original_currency, original_amount, exchange_rate, pocket_id
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             RETURNING id
             "#,
             amount,
@@ -129,7 +130,8 @@ impl TransactionRepository {
             occurred_at,
             original_currency,
             original_amount,
-            exchange_rate
+            exchange_rate,
+            pocket_id
         )
         .fetch_one(&self.pool)
         .await?;
@@ -139,22 +141,34 @@ impl TransactionRepository {
     pub async fn find_by_user_and_date(
         &self,
         user_id: Uuid,
-        start_date: DateTime<Utc>,
-        end_date: DateTime<Utc>,
+        start_date: Option<DateTime<Utc>>,
+        end_date: Option<DateTime<Utc>>,
+        pocket_id: Option<Uuid>,
+        limit: i64,
+        offset: i64,
     ) -> Result<Vec<Transaction>, AppError> {
         let transactions = sqlx::query!(
             r#"
             SELECT 
                 t.id, t.amount, t.description, t.category_id, t.occurred_at, t.created_at,
-                c.name as "category_name?", c.icon as category_icon, COALESCE(c.is_income, FALSE) as "category_is_income!"
+                c.name as "category_name?", c.icon as category_icon, COALESCE(c.is_income, FALSE) as "category_is_income!",
+                p.id as "pocket_id?", p.name as "pocket_name?", p.icon as "pocket_icon?"
             FROM transactions t
             LEFT JOIN categories c ON t.category_id = c.id
-            WHERE t.user_id = $3 AND t.occurred_at BETWEEN $1 AND $2
+            LEFT JOIN pockets p ON t.pocket_id = p.id
+            WHERE t.user_id = $3 
+              AND ($1::timestamptz IS NULL OR t.occurred_at >= $1)
+              AND ($2::timestamptz IS NULL OR t.occurred_at <= $2)
+              AND ($4::uuid IS NULL OR t.pocket_id = $4)
             ORDER BY t.occurred_at DESC
+            LIMIT $5 OFFSET $6
             "#,
             start_date,
             end_date,
-            user_id
+            user_id,
+            pocket_id,
+            limit,
+            offset
         )
         .fetch_all(&self.pool)
         .await?
@@ -169,12 +183,44 @@ impl TransactionRepository {
                 is_income: row.category_is_income,
                 icon: row.category_icon.unwrap_or_else(|| "help_outline".to_string()),
             }),
+            pocket: row.pocket_id.map(|id| PocketSummary {
+                id,
+                name: row.pocket_name.unwrap_or_default(),
+                icon: row.pocket_icon.unwrap_or_else(|| "account_balance_wallet".to_string()),
+            }),
             occurred_at: row.occurred_at,
             created_at: row.created_at,
         })
         .collect();
 
         Ok(transactions)
+    }
+
+    pub async fn count_by_user_and_date(
+        &self,
+        user_id: Uuid,
+        start_date: Option<DateTime<Utc>>,
+        end_date: Option<DateTime<Utc>>,
+        pocket_id: Option<Uuid>,
+    ) -> Result<i64, AppError> {
+        let result = sqlx::query!(
+            r#"
+            SELECT COUNT(*) as "count!"
+            FROM transactions t
+            WHERE t.user_id = $3 
+              AND ($1::timestamptz IS NULL OR t.occurred_at >= $1)
+              AND ($2::timestamptz IS NULL OR t.occurred_at <= $2)
+              AND ($4::uuid IS NULL OR t.pocket_id = $4)
+            "#,
+            start_date,
+            end_date,
+            user_id,
+            pocket_id
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(result.count)
     }
 
     pub async fn get_transaction(
@@ -554,6 +600,164 @@ impl PortfolioRepository {
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+}
+
+pub struct PocketRepository {
+    pool: PgPool,
+}
+
+impl PocketRepository {
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+
+    pub async fn create(
+        &self,
+        user_id: Uuid,
+        name: &str,
+        description: Option<String>,
+        icon: Option<String>,
+    ) -> Result<Uuid, AppError> {
+        let icon = icon.unwrap_or_else(|| "account_balance_wallet".to_string());
+        let id = sqlx::query_scalar!(
+            r#"
+            INSERT INTO pockets (user_id, name, description, icon)
+            VALUES ($1, $2, $3, $4)
+            RETURNING id
+            "#,
+            user_id,
+            name,
+            description,
+            icon
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(id)
+    }
+
+    pub async fn create_default_for_user(&self, user_id: Uuid) -> Result<Uuid, AppError> {
+        let id = sqlx::query_scalar!(
+            r#"
+            INSERT INTO pockets (user_id, name, is_default)
+            VALUES ($1, 'Main', TRUE)
+            RETURNING id
+            "#,
+            user_id
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(id)
+    }
+
+    pub async fn get_all(&self, user_id: Uuid) -> Result<Vec<Pocket>, AppError> {
+        let pockets = sqlx::query_as!(
+            Pocket,
+            r#"
+            SELECT 
+                id, name, description, 
+                COALESCE(icon, 'account_balance_wallet') as "icon!",
+                COALESCE(is_default, FALSE) as "is_default!",
+                created_at
+            FROM pockets
+            WHERE user_id = $1
+            ORDER BY is_default DESC, name ASC
+            "#,
+            user_id
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(pockets)
+    }
+
+    pub async fn get_by_id(&self, id: Uuid, user_id: Uuid) -> Result<Pocket, AppError> {
+        let pocket = sqlx::query_as!(
+            Pocket,
+            r#"
+            SELECT 
+                id, name, description, 
+                COALESCE(icon, 'account_balance_wallet') as "icon!",
+                COALESCE(is_default, FALSE) as "is_default!",
+                created_at
+            FROM pockets
+            WHERE id = $1 AND user_id = $2
+            "#,
+            id,
+            user_id
+        )
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(AppError::NotFoundError("Pocket not found".to_string()))?;
+        Ok(pocket)
+    }
+
+    pub async fn get_default(&self, user_id: Uuid) -> Result<Pocket, AppError> {
+        let pocket = sqlx::query_as!(
+            Pocket,
+            r#"
+            SELECT 
+                id, name, description, 
+                COALESCE(icon, 'account_balance_wallet') as "icon!",
+                COALESCE(is_default, FALSE) as "is_default!",
+                created_at
+            FROM pockets
+            WHERE user_id = $1 AND is_default = TRUE
+            "#,
+            user_id
+        )
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(AppError::NotFoundError(
+            "Default pocket not found".to_string(),
+        ))?;
+        Ok(pocket)
+    }
+
+    pub async fn update(
+        &self,
+        id: Uuid,
+        user_id: Uuid,
+        name: Option<String>,
+        description: Option<String>,
+        icon: Option<String>,
+    ) -> Result<(), AppError> {
+        sqlx::query!(
+            r#"
+            UPDATE pockets 
+            SET 
+                name = COALESCE($3, name),
+                description = COALESCE($4, description),
+                icon = COALESCE($5, icon)
+            WHERE id = $1 AND user_id = $2
+            "#,
+            id,
+            user_id,
+            name,
+            description,
+            icon
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn delete(&self, id: Uuid, user_id: Uuid) -> Result<u64, AppError> {
+        // First check if this is a default pocket
+        let pocket = self.get_by_id(id, user_id).await?;
+        if pocket.is_default {
+            return Err(AppError::ValidationError(
+                "Cannot delete the default pocket".to_string(),
+            ));
+        }
+
+        let result = sqlx::query!(
+            "DELETE FROM pockets WHERE id = $1 AND user_id = $2",
+            id,
+            user_id
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected())
     }
 }
 

@@ -6,11 +6,13 @@ use crate::auth::{Claims, get_keys, hash_password, verify_password};
 use crate::error::AppError;
 use crate::investments;
 use crate::repository::{
-    PortfolioRepository, SettingsRepository, TransactionRepository, UserRepository,
+    PocketRepository, PortfolioRepository, SettingsRepository, TransactionRepository,
+    UserRepository,
 };
 use crate::schemas::{
-    AuthResponse, Category, CreatePortfolioItem, CreateTransaction, FinancialHealth, LoginRequest,
-    RegisterRequest, Transaction, TransactionDetail, UpdateInvestment, UserProfile,
+    AuthResponse, Category, CreatePocket, CreatePortfolioItem, CreateTransaction, FinancialHealth,
+    LoginRequest, Pocket, RegisterRequest, TransactionDetail, UpdateInvestment, UpdatePocket,
+    UserProfile,
 };
 
 use jsonwebtoken::{Header, encode};
@@ -18,13 +20,19 @@ use jsonwebtoken::{Header, encode};
 pub struct AuthService {
     user_repo: UserRepository,
     settings_repo: SettingsRepository,
+    pocket_repo: PocketRepository,
 }
 
 impl AuthService {
-    pub fn new(user_repo: UserRepository, settings_repo: SettingsRepository) -> Self {
+    pub fn new(
+        user_repo: UserRepository,
+        settings_repo: SettingsRepository,
+        pocket_repo: PocketRepository,
+    ) -> Self {
         Self {
             user_repo,
             settings_repo,
+            pocket_repo,
         }
     }
 
@@ -59,6 +67,9 @@ impl AuthService {
         self.settings_repo
             .set_base_currency(user_id, &req.base_currency)
             .await?;
+
+        // Create default pocket for the new user
+        self.pocket_repo.create_default_for_user(user_id).await?;
 
         // Auto-login (generate token)
         let token = self.generate_token(user_id)?;
@@ -106,6 +117,7 @@ impl AuthService {
 
 pub struct TransactionService {
     transaction_repo: TransactionRepository,
+    pocket_repo: PocketRepository,
     settings_repo: SettingsRepository,
     http_client: reqwest::Client,
 }
@@ -113,11 +125,13 @@ pub struct TransactionService {
 impl TransactionService {
     pub fn new(
         transaction_repo: TransactionRepository,
+        pocket_repo: PocketRepository,
         settings_repo: SettingsRepository,
         http_client: reqwest::Client,
     ) -> Self {
         Self {
             transaction_repo,
+            pocket_repo,
             settings_repo,
             http_client,
         }
@@ -162,6 +176,12 @@ impl TransactionService {
 
         let description = req.description.filter(|d| !d.trim().is_empty());
 
+        // Get pocket_id: use provided one, or fall back to default pocket
+        let pocket_id = match req.pocket_id {
+            Some(id) => id,
+            None => self.pocket_repo.get_default(user_id).await?.id,
+        };
+
         self.transaction_repo
             .create(
                 user_id,
@@ -172,6 +192,7 @@ impl TransactionService {
                 original_currency,
                 original_amount,
                 exchange_rate,
+                pocket_id,
             )
             .await
     }
@@ -179,17 +200,44 @@ impl TransactionService {
     pub async fn get_transactions(
         &self,
         user_id: Uuid,
-        start_date: DateTime<Utc>,
-        end_date: DateTime<Utc>,
-    ) -> Result<Vec<Transaction>, AppError> {
-        if end_date < start_date {
-            return Err(AppError::ValidationError(
-                "End date cannot be before start date".to_string(),
-            ));
+        start_date: Option<DateTime<Utc>>,
+        end_date: Option<DateTime<Utc>>,
+        pocket_id: Option<Uuid>,
+        page: i64,
+        limit: i64,
+    ) -> Result<crate::schemas::PaginatedTransactions, AppError> {
+        if let (Some(start), Some(end)) = (start_date, end_date) {
+            if end < start {
+                return Err(AppError::ValidationError(
+                    "End date cannot be before start date".to_string(),
+                ));
+            }
         }
-        self.transaction_repo
-            .find_by_user_and_date(user_id, start_date, end_date)
-            .await
+
+        // Clamp limit to reasonable values
+        let limit = limit.clamp(1, 100);
+        let page = page.max(1);
+        let offset = (page - 1) * limit;
+
+        let transactions = self
+            .transaction_repo
+            .find_by_user_and_date(user_id, start_date, end_date, pocket_id, limit, offset)
+            .await?;
+
+        let total = self
+            .transaction_repo
+            .count_by_user_and_date(user_id, start_date, end_date, pocket_id)
+            .await?;
+
+        let total_pages = (total as f64 / limit as f64).ceil() as i64;
+
+        Ok(crate::schemas::PaginatedTransactions {
+            transactions,
+            total,
+            page,
+            limit,
+            total_pages,
+        })
     }
 
     pub async fn get_spending_analysis(
@@ -511,5 +559,63 @@ impl FinanceService {
         self.portfolio_repo
             .update(user_id, &ticker, payload.quantity, payload.avg_buy_price)
             .await
+    }
+}
+
+pub struct PocketService {
+    pocket_repo: PocketRepository,
+}
+
+impl PocketService {
+    pub fn new(pocket_repo: PocketRepository) -> Self {
+        Self { pocket_repo }
+    }
+
+    pub async fn create_pocket(&self, user_id: Uuid, req: CreatePocket) -> Result<Uuid, AppError> {
+        if req.name.trim().is_empty() {
+            return Err(AppError::ValidationError(
+                "Pocket name cannot be empty".to_string(),
+            ));
+        }
+
+        self.pocket_repo
+            .create(user_id, &req.name, req.description, req.icon)
+            .await
+    }
+
+    pub async fn get_pockets(&self, user_id: Uuid) -> Result<Vec<Pocket>, AppError> {
+        self.pocket_repo.get_all(user_id).await
+    }
+
+    pub async fn get_pocket(&self, id: Uuid, user_id: Uuid) -> Result<Pocket, AppError> {
+        self.pocket_repo.get_by_id(id, user_id).await
+    }
+
+    pub async fn update_pocket(
+        &self,
+        id: Uuid,
+        user_id: Uuid,
+        req: UpdatePocket,
+    ) -> Result<(), AppError> {
+        // Validate name if provided
+        if let Some(ref name) = req.name {
+            if name.trim().is_empty() {
+                return Err(AppError::ValidationError(
+                    "Pocket name cannot be empty".to_string(),
+                ));
+            }
+        }
+
+        self.pocket_repo
+            .update(id, user_id, req.name, req.description, req.icon)
+            .await
+    }
+
+    pub async fn delete_pocket(&self, id: Uuid, user_id: Uuid) -> Result<(), AppError> {
+        let deleted = self.pocket_repo.delete(id, user_id).await?;
+        if deleted == 0 {
+            return Err(AppError::NotFoundError("Pocket not found".to_string()));
+        }
+        Ok(())
     }
 }

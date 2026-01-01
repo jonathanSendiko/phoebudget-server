@@ -9,10 +9,10 @@ use crate::error::AppError;
 use crate::repository::{PortfolioRepository, SettingsRepository};
 use crate::response::ApiResponse;
 use crate::schemas::{
-    AuthResponse, Category, CreatePortfolioItem, CreateTransaction, DateRangeParams,
-    FinancialHealth, LoginRequest, RegisterRequest, SpendingAnalysisResponse, Transaction,
-    TransactionDetail, TransactionId, UpdateCurrency, UpdateInvestment, UpdateTransaction,
-    UserProfile,
+    AuthResponse, Category, CreatePocket, CreatePortfolioItem, CreateTransaction, DateRangeParams,
+    FinancialHealth, LoginRequest, PaginatedTransactions, Pocket, PocketId, RegisterRequest,
+    SpendingAnalysisResponse, TransactionDetail, TransactionId, TransactionQueryParams,
+    UpdateCurrency, UpdateInvestment, UpdatePocket, UpdateTransaction, UserProfile,
 };
 
 // --- Auth Handlers ---
@@ -92,13 +92,20 @@ pub async fn delete_transaction(
 pub async fn get_transactions(
     State(state): State<AppState>,
     user_id: UserId,
-    Query(params): Query<DateRangeParams>,
-) -> Result<Json<ApiResponse<Vec<Transaction>>>, AppError> {
-    let rows = state
+    Query(params): Query<TransactionQueryParams>,
+) -> Result<Json<ApiResponse<PaginatedTransactions>>, AppError> {
+    let result = state
         .transaction_service()
-        .get_transactions(user_id.0, params.start_date, params.end_date)
+        .get_transactions(
+            user_id.0,
+            params.start_date,
+            params.end_date,
+            params.pocket_id,
+            params.page,
+            params.limit,
+        )
         .await?;
-    Ok(Json(ApiResponse::success(rows, None)))
+    Ok(Json(ApiResponse::success(result, None)))
 }
 
 pub async fn get_transaction(
@@ -246,4 +253,69 @@ pub async fn get_assets(
     let portfolio_repo = PortfolioRepository::new(state.db.clone());
     let assets = portfolio_repo.get_all_assets().await?;
     Ok(Json(ApiResponse::success(assets, None)))
+}
+
+// --- Pocket Handlers ---
+
+pub async fn create_pocket(
+    State(state): State<AppState>,
+    user_id: UserId,
+    Json(payload): Json<CreatePocket>,
+) -> Result<Json<ApiResponse<PocketId>>, AppError> {
+    let id = state
+        .pocket_service()
+        .create_pocket(user_id.0, payload)
+        .await?;
+    Ok(Json(ApiResponse::success(
+        PocketId { id },
+        Some("Pocket created".to_string()),
+    )))
+}
+
+pub async fn get_pockets(
+    State(state): State<AppState>,
+    user_id: UserId,
+) -> Result<Json<ApiResponse<Vec<Pocket>>>, AppError> {
+    let pockets = state.pocket_service().get_pockets(user_id.0).await?;
+    Ok(Json(ApiResponse::success(pockets, None)))
+}
+
+pub async fn get_pocket(
+    State(state): State<AppState>,
+    user_id: UserId,
+    path: axum::extract::Path<uuid::Uuid>,
+) -> Result<Json<ApiResponse<Pocket>>, AppError> {
+    let pocket = state.pocket_service().get_pocket(path.0, user_id.0).await?;
+    Ok(Json(ApiResponse::success(pocket, None)))
+}
+
+pub async fn update_pocket(
+    State(state): State<AppState>,
+    user_id: UserId,
+    path: axum::extract::Path<uuid::Uuid>,
+    Json(payload): Json<UpdatePocket>,
+) -> Result<Json<ApiResponse<String>>, AppError> {
+    state
+        .pocket_service()
+        .update_pocket(path.0, user_id.0, payload)
+        .await?;
+    Ok(Json(ApiResponse::success(
+        "Pocket updated".to_string(),
+        None,
+    )))
+}
+
+pub async fn delete_pocket(
+    State(state): State<AppState>,
+    user_id: UserId,
+    path: axum::extract::Path<uuid::Uuid>,
+) -> Result<Json<ApiResponse<String>>, AppError> {
+    state
+        .pocket_service()
+        .delete_pocket(path.0, user_id.0)
+        .await?;
+    Ok(Json(ApiResponse::success(
+        "Pocket deleted".to_string(),
+        None,
+    )))
 }

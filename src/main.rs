@@ -74,12 +74,14 @@ impl AppState {
         services::AuthService::new(
             repository::UserRepository::new(self.db.clone()),
             repository::SettingsRepository::new(self.db.clone()),
+            repository::PocketRepository::new(self.db.clone()),
         )
     }
 
     pub fn transaction_service(&self) -> services::TransactionService {
         services::TransactionService::new(
             repository::TransactionRepository::new(self.db.clone()),
+            repository::PocketRepository::new(self.db.clone()),
             repository::SettingsRepository::new(self.db.clone()),
             self.http_client.clone(),
         )
@@ -94,6 +96,10 @@ impl AppState {
             self.exchange_rate_cache.clone(),
             self.http_client.clone(),
         )
+    }
+
+    pub fn pocket_service(&self) -> services::PocketService {
+        services::PocketService::new(repository::PocketRepository::new(self.db.clone()))
     }
 }
 
@@ -185,7 +191,17 @@ async fn main() {
             "/portfolio",
             post(handlers::add_investment).get(handlers::get_portfolio),
         )
-        .route("/assets", get(handlers::get_assets));
+        .route("/assets", get(handlers::get_assets))
+        .route(
+            "/pockets",
+            post(handlers::create_pocket).get(handlers::get_pockets),
+        )
+        .route(
+            "/pockets/{id}",
+            get(handlers::get_pocket)
+                .put(handlers::update_pocket)
+                .delete(handlers::delete_pocket),
+        );
 
     let app = Router::new()
         .route("/", get(health_check))

@@ -33,6 +33,7 @@ pub struct CreateTransaction {
     pub category_id: i32,
     pub occurred_at: DateTime<Utc>,
     pub currency_code: Option<String>,
+    pub pocket_id: Option<Uuid>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -52,6 +53,25 @@ pub struct CreatePortfolioItem {
 }
 
 #[derive(Deserialize)]
+pub struct TransactionQueryParams {
+    pub start_date: Option<DateTime<Utc>>,
+    pub end_date: Option<DateTime<Utc>>,
+    pub pocket_id: Option<Uuid>,
+    #[serde(default = "default_page")]
+    pub page: i64,
+    #[serde(default = "default_limit")]
+    pub limit: i64,
+}
+
+fn default_page() -> i64 {
+    1
+}
+
+fn default_limit() -> i64 {
+    10
+}
+
+#[derive(Deserialize)]
 pub struct DateRangeParams {
     pub start_date: DateTime<Utc>,
     pub end_date: DateTime<Utc>,
@@ -66,8 +86,18 @@ pub struct Transaction {
     pub amount: Decimal,
     pub description: Option<String>,
     pub category: Option<Category>,
+    pub pocket: Option<PocketSummary>,
     pub occurred_at: DateTime<Utc>,
     pub created_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Serialize, Debug)]
+pub struct PaginatedTransactions {
+    pub transactions: Vec<Transaction>,
+    pub total: i64,
+    pub page: i64,
+    pub limit: i64,
+    pub total_pages: i64,
 }
 
 #[derive(Serialize, Debug)]
@@ -87,6 +117,45 @@ pub struct TransactionDetail {
 
 #[derive(Serialize)]
 pub struct TransactionId {
+    pub id: Uuid,
+}
+
+// --- Pocket DTOs ---
+
+#[derive(Deserialize, Debug)]
+pub struct CreatePocket {
+    pub name: String,
+    pub description: Option<String>,
+    pub icon: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct UpdatePocket {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub icon: Option<String>,
+}
+
+#[derive(Serialize, Debug, Clone)]
+pub struct Pocket {
+    pub id: Uuid,
+    pub name: String,
+    pub description: Option<String>,
+    pub icon: String,
+    pub is_default: bool,
+    pub created_at: Option<DateTime<Utc>>,
+}
+
+/// Lightweight pocket info for embedding in transactions
+#[derive(Serialize, Debug, Clone)]
+pub struct PocketSummary {
+    pub id: Uuid,
+    pub name: String,
+    pub icon: String,
+}
+
+#[derive(Serialize)]
+pub struct PocketId {
     pub id: Uuid,
 }
 
