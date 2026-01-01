@@ -142,12 +142,11 @@ impl TransactionRepository {
         start_date: DateTime<Utc>,
         end_date: DateTime<Utc>,
     ) -> Result<Vec<Transaction>, AppError> {
-        let rows = sqlx::query_as!(
-            Transaction,
+        let transactions = sqlx::query!(
             r#"
             SELECT 
                 t.id, t.amount, t.description, t.category_id, t.occurred_at, t.created_at,
-                c.name as category_name, c.icon as category_icon
+                c.name as "category_name?", c.icon as category_icon, COALESCE(c.is_income, FALSE) as "category_is_income!"
             FROM transactions t
             LEFT JOIN categories c ON t.category_id = c.id
             WHERE t.user_id = $3 AND t.occurred_at BETWEEN $1 AND $2
@@ -158,18 +157,37 @@ impl TransactionRepository {
             user_id
         )
         .fetch_all(&self.pool)
-        .await?;
-        Ok(rows)
+        .await?
+        .into_iter()
+        .map(|row| Transaction {
+            id: row.id,
+            amount: row.amount,
+            description: row.description,
+            category: row.category_id.map(|id| Category {
+                id,
+                name: row.category_name.unwrap_or_default(),
+                is_income: row.category_is_income,
+                icon: row.category_icon.unwrap_or_else(|| "help_outline".to_string()),
+            }),
+            occurred_at: row.occurred_at,
+            created_at: row.created_at,
+        })
+        .collect();
+
+        Ok(transactions)
     }
 
-    pub async fn find_by_id(&self, id: Uuid, user_id: Uuid) -> Result<TransactionDetail, AppError> {
-        let transaction = sqlx::query_as!(
-            TransactionDetail,
+    pub async fn get_transaction(
+        &self,
+        id: Uuid,
+        user_id: Uuid,
+    ) -> Result<TransactionDetail, AppError> {
+        let row = sqlx::query!(
             r#"
             SELECT 
                 t.id, t.amount, t.description, t.category_id, t.occurred_at, t.created_at,
                 t.original_currency, t.original_amount, t.exchange_rate,
-                c.name as category_name, c.icon as category_icon
+                c.name as "category_name?", c.icon as category_icon, COALESCE(c.is_income, FALSE) as "category_is_income!"
             FROM transactions t
             LEFT JOIN categories c ON t.category_id = c.id
             WHERE t.id = $1 AND t.user_id = $2
@@ -181,7 +199,24 @@ impl TransactionRepository {
         .await?
         .ok_or(AppError::NotFoundError("Transaction not found".to_string()))?;
 
-        Ok(transaction)
+        Ok(TransactionDetail {
+            id: row.id,
+            amount: row.amount,
+            description: row.description,
+            category: row.category_id.map(|id| Category {
+                id,
+                name: row.category_name.unwrap_or_default(),
+                is_income: row.category_is_income,
+                icon: row
+                    .category_icon
+                    .unwrap_or_else(|| "help_outline".to_string()),
+            }),
+            occurred_at: row.occurred_at,
+            created_at: row.created_at,
+            original_currency: row.original_currency,
+            original_amount: row.original_amount,
+            exchange_rate: row.exchange_rate,
+        })
     }
 
     pub async fn get_spending_analysis(

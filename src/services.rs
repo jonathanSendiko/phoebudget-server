@@ -256,7 +256,7 @@ impl TransactionService {
         user_id: Uuid,
         id: Uuid,
     ) -> Result<TransactionDetail, AppError> {
-        self.transaction_repo.find_by_id(id, user_id).await
+        self.transaction_repo.get_transaction(id, user_id).await
     }
 }
 
