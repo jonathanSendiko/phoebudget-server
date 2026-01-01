@@ -221,6 +221,8 @@ pub struct PortfolioResponse {
     pub total_cost: Decimal,
     #[serde(serialize_with = "round_currency")]
     pub absolute_change: Decimal,
+    #[serde(serialize_with = "round_currency")]
+    pub total_value: Decimal,
 }
 
 // --- Auth DTOs ---

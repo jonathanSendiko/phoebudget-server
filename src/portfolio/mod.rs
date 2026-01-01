@@ -66,6 +66,7 @@ pub fn build_portfolio_response(
     let mut summary_list = Vec::with_capacity(items.len());
     let mut total_cost = Decimal::ZERO;
     let mut absolute_change = Decimal::ZERO;
+    let mut total_value = Decimal::ZERO;
 
     for item in items {
         let asset_currency = item.currency.clone().unwrap_or_else(|| "USD".to_string());
@@ -77,6 +78,7 @@ pub fn build_portfolio_response(
 
         total_cost += cost_converted;
         absolute_change += value_converted - cost_converted;
+        total_value += value_converted;
 
         let summary = calculate_investment_summary(item, rate, base_currency);
         summary_list.push(summary);
@@ -86,6 +88,7 @@ pub fn build_portfolio_response(
         investments: summary_list,
         total_cost,
         absolute_change,
+        total_value,
     }
 }
 
