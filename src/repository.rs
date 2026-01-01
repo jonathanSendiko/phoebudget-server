@@ -146,10 +146,12 @@ impl TransactionRepository {
             Transaction,
             r#"
             SELECT 
-                id, amount, description, category_id, occurred_at, created_at
-            FROM transactions
-            WHERE user_id = $3 AND occurred_at BETWEEN $1 AND $2
-            ORDER BY occurred_at DESC
+                t.id, t.amount, t.description, t.category_id, t.occurred_at, t.created_at,
+                c.name as category_name, c.icon as category_icon
+            FROM transactions t
+            LEFT JOIN categories c ON t.category_id = c.id
+            WHERE t.user_id = $3 AND t.occurred_at BETWEEN $1 AND $2
+            ORDER BY t.occurred_at DESC
             "#,
             start_date,
             end_date,
@@ -165,10 +167,12 @@ impl TransactionRepository {
             TransactionDetail,
             r#"
             SELECT 
-                id, amount, description, category_id, occurred_at, created_at,
-                original_currency, original_amount, exchange_rate
-            FROM transactions
-            WHERE id = $1 AND user_id = $2
+                t.id, t.amount, t.description, t.category_id, t.occurred_at, t.created_at,
+                t.original_currency, t.original_amount, t.exchange_rate,
+                c.name as category_name, c.icon as category_icon
+            FROM transactions t
+            LEFT JOIN categories c ON t.category_id = c.id
+            WHERE t.id = $1 AND t.user_id = $2
             "#,
             id,
             user_id

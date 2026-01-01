@@ -66,6 +66,8 @@ pub struct Transaction {
     pub amount: Decimal,
     pub description: Option<String>,
     pub category_id: Option<i32>,
+    pub category_name: Option<String>,
+    pub category_icon: Option<String>,
     pub occurred_at: DateTime<Utc>,
     pub created_at: Option<DateTime<Utc>>,
 }
@@ -77,6 +79,8 @@ pub struct TransactionDetail {
     pub amount: Decimal,
     pub description: Option<String>,
     pub category_id: Option<i32>,
+    pub category_name: Option<String>,
+    pub category_icon: Option<String>,
     pub occurred_at: DateTime<Utc>,
     pub created_at: Option<DateTime<Utc>>,
     pub original_currency: Option<String>,
