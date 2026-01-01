@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE assets SET icon_url = $1 WHERE ticker = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ff3e4505fdac2245c18cd54bc0b5963cf836b87b6b9daa7f95fc72d3d94c8ebf"
+}

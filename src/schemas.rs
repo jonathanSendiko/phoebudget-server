@@ -95,6 +95,18 @@ pub struct CategorySummary {
     pub category: String,
     #[serde(serialize_with = "round_currency")]
     pub total: Decimal,
+    pub is_income: bool,
+}
+
+#[derive(Serialize, Debug)]
+pub struct SpendingAnalysisResponse {
+    #[serde(serialize_with = "round_currency")]
+    pub total_income: Decimal,
+    #[serde(serialize_with = "round_currency")]
+    pub total_spent: Decimal,
+    #[serde(serialize_with = "round_currency")]
+    pub net_income: Decimal,
+    pub categories: Vec<CategorySummary>,
 }
 
 #[derive(Serialize, Debug)]
@@ -121,6 +133,16 @@ pub struct InvestmentSummary {
     pub total_value: Decimal,
     #[serde(serialize_with = "round_currency")]
     pub change_pct: Decimal,
+    pub icon_url: Option<String>,
+}
+
+#[derive(Serialize, Debug)]
+pub struct PortfolioResponse {
+    pub investments: Vec<InvestmentSummary>,
+    #[serde(serialize_with = "round_currency")]
+    pub total_cost: Decimal,
+    #[serde(serialize_with = "round_currency")]
+    pub absolute_change: Decimal,
 }
 
 // --- Auth DTOs ---
@@ -185,4 +207,5 @@ pub struct Asset {
     pub source: Option<String>,
     #[serde(serialize_with = "round_currency_option")]
     pub current_price: Option<Decimal>,
+    pub icon_url: Option<String>,
 }

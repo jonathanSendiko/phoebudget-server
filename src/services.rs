@@ -9,8 +9,8 @@ use crate::repository::{
     PortfolioRepository, SettingsRepository, TransactionRepository, UserRepository,
 };
 use crate::schemas::{
-    AuthResponse, CategorySummary, CreatePortfolioItem, CreateTransaction, FinancialHealth,
-    LoginRequest, RegisterRequest, Transaction, TransactionDetail, UpdateInvestment, UserProfile,
+    AuthResponse, CreatePortfolioItem, CreateTransaction, FinancialHealth, LoginRequest,
+    RegisterRequest, Transaction, TransactionDetail, UpdateInvestment, UserProfile,
 };
 
 use jsonwebtoken::{Header, encode};
@@ -184,10 +184,31 @@ impl TransactionService {
         user_id: Uuid,
         start_date: DateTime<Utc>,
         end_date: DateTime<Utc>,
-    ) -> Result<Vec<CategorySummary>, AppError> {
-        self.transaction_repo
+    ) -> Result<crate::schemas::SpendingAnalysisResponse, AppError> {
+        let categories = self
+            .transaction_repo
             .get_spending_analysis(user_id, start_date, end_date)
-            .await
+            .await?;
+
+        let mut total_income = Decimal::ZERO;
+        let mut total_spent = Decimal::ZERO;
+
+        for cat in &categories {
+            if cat.is_income {
+                total_income += cat.total;
+            } else {
+                total_spent += cat.total;
+            }
+        }
+
+        let net_income = total_income - total_spent;
+
+        Ok(crate::schemas::SpendingAnalysisResponse {
+            total_income,
+            total_spent,
+            net_income,
+            categories,
+        })
     }
     pub async fn update_transaction(
         &self,
@@ -327,12 +348,30 @@ impl FinanceService {
         tracing::info!("Cache MISS for {}", ticker);
 
         // Fetch asset from DB to know Source and API Ticker
+        // Fetch asset from DB to know Source and API Ticker
         let asset_opt = self.portfolio_repo.get_asset(ticker).await?;
         let (api_ticker, source) = if let Some(asset) = asset_opt {
-            (
-                asset.api_ticker.unwrap_or(ticker.to_string()),
-                asset.source.unwrap_or("YAHOO".to_string()),
-            )
+            let api_ticker = asset.api_ticker.unwrap_or(ticker.to_string());
+            let source = asset.source.unwrap_or("YAHOO".to_string());
+
+            // NEW: Check for missing icon and populate it lazily
+            if asset.icon_url.is_none() && source == "COINGECKO" {
+                tracing::info!("Missing icon for {}, fetching from CoinGecko...", ticker);
+                // We don't want to fail the whole request if icon fetch fails
+                match investments::fetch_coingecko_icon(&api_ticker).await {
+                    Ok(Some(url)) => {
+                        if let Err(e) = self.portfolio_repo.update_asset_icon(ticker, &url).await {
+                            tracing::error!("Failed to save icon for {}: {:?}", ticker, e);
+                        } else {
+                            tracing::info!("Updated icon for {}", ticker);
+                        }
+                    }
+                    Ok(None) => tracing::warn!("No icon found for {}", ticker),
+                    Err(e) => tracing::error!("Failed to fetch icon for {}: {:?}", ticker, e),
+                }
+            }
+
+            (api_ticker, source)
         } else {
             // If asset not found in DB, for now we default to YAHOO/Ticker
             // (e.g. legacy behavior or if someone manually inserted via sql)
@@ -354,7 +393,7 @@ impl FinanceService {
     pub async fn get_portfolio_list(
         &self,
         user_id: Uuid,
-    ) -> Result<Vec<crate::schemas::InvestmentSummary>, AppError> {
+    ) -> Result<crate::schemas::PortfolioResponse, AppError> {
         // Ensure prices are fresh first
         let tickers = self.portfolio_repo.get_tickers(user_id).await?;
         for ticker in tickers {
@@ -366,9 +405,19 @@ impl FinanceService {
 
         let raw_items = self.portfolio_repo.get_all_joined(user_id).await?;
         let mut summary_list = Vec::new();
+        let mut total_cost = Decimal::ZERO;
+        let mut absolute_change = Decimal::ZERO;
 
-        for (ticker, name, quantity, avg_buy, current_price, _source, _api_ticker) in raw_items {
+        for (ticker, name, quantity, avg_buy, current_price, _source, _api_ticker, icon_url) in
+            raw_items
+        {
             let total_value = quantity * current_price;
+            let cost = quantity * avg_buy;
+            let change = (current_price - avg_buy) * quantity;
+
+            // Accumulate totals
+            total_cost += cost;
+            absolute_change += change;
 
             // Calculate Change %
             // If avg_buy is 0 (shouldn't happen properly but safety first), change is 0.
@@ -386,10 +435,15 @@ impl FinanceService {
                 current_price,
                 total_value,
                 change_pct,
+                icon_url,
             });
         }
 
-        Ok(summary_list)
+        Ok(crate::schemas::PortfolioResponse {
+            investments: summary_list,
+            total_cost,
+            absolute_change,
+        })
     }
     pub async fn update_base_currency(
         &self,

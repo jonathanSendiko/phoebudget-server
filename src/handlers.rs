@@ -11,9 +11,9 @@ use crate::repository::{
 };
 use crate::response::ApiResponse;
 use crate::schemas::{
-    AuthResponse, CategorySummary, CreatePortfolioItem, CreateTransaction, DateRangeParams,
-    FinancialHealth, LoginRequest, RegisterRequest, Transaction, TransactionDetail, TransactionId,
-    UpdateCurrency, UpdateInvestment, UpdateTransaction, UserProfile,
+    AuthResponse, CreatePortfolioItem, CreateTransaction, DateRangeParams, FinancialHealth,
+    LoginRequest, RegisterRequest, SpendingAnalysisResponse, Transaction, TransactionDetail,
+    TransactionId, UpdateCurrency, UpdateInvestment, UpdateTransaction, UserProfile,
 };
 use crate::services::{AuthService, FinanceService, TransactionService};
 
@@ -148,7 +148,7 @@ pub async fn get_spending_analysis(
     State(state): State<AppState>,
     user_id: UserId,
     Query(params): Query<DateRangeParams>,
-) -> Result<Json<ApiResponse<Vec<CategorySummary>>>, AppError> {
+) -> Result<Json<ApiResponse<SpendingAnalysisResponse>>, AppError> {
     let transaction_repo = TransactionRepository::new(state.db.clone());
     let settings_repo = SettingsRepository::new(state.db.clone());
     let service = TransactionService::new(transaction_repo, settings_repo);
@@ -231,7 +231,7 @@ pub async fn add_investment(
 pub async fn get_portfolio(
     State(state): State<AppState>,
     user_id: UserId,
-) -> Result<Json<ApiResponse<Vec<crate::schemas::InvestmentSummary>>>, AppError> {
+) -> Result<Json<ApiResponse<crate::schemas::PortfolioResponse>>, AppError> {
     let portfolio_repo = PortfolioRepository::new(state.db.clone());
     let transaction_repo = TransactionRepository::new(state.db.clone());
     let settings_repo = SettingsRepository::new(state.db.clone());

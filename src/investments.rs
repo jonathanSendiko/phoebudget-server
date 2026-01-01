@@ -178,6 +178,49 @@ async fn fetch_price_coingecko(ticker: &str) -> Result<Decimal, AppError> {
         .ok_or_else(|| AppError::ValidationError("Failed to parse CoinGecko price".to_string()))
 }
 
+// Internal structs for CoinGecko icon API response
+#[derive(Deserialize, Debug)]
+struct CoinGeckoIconResponse {
+    image: CoinGeckoImage,
+}
+
+#[derive(Deserialize, Debug)]
+struct CoinGeckoImage {
+    large: String,
+}
+
+/// Fetch icon URL from CoinGecko API for a given coin ID
+pub async fn fetch_coingecko_icon(coin_id: &str) -> Result<Option<String>, AppError> {
+    let id = coin_id.to_lowercase();
+    let url = format!("https://api.coingecko.com/api/v3/coins/{}", id);
+
+    let client = reqwest::Client::new();
+    let resp = client.get(&url).send().await.map_err(|e| {
+        tracing::warn!("CoinGecko icon API connection failed for {}: {}", id, e);
+        return AppError::ValidationError(format!("CoinGecko icon API connection failed: {}", e));
+    })?;
+
+    if !resp.status().is_success() {
+        tracing::warn!(
+            "CoinGecko icon API returned error {} for {}",
+            resp.status(),
+            id
+        );
+        // Return None instead of error - icon is optional
+        return Ok(None);
+    }
+
+    let data: CoinGeckoIconResponse = match resp.json().await {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::warn!("Failed to parse CoinGecko icon response for {}: {}", id, e);
+            return Ok(None);
+        }
+    };
+
+    Ok(Some(data.image.large))
+}
+
 // Internal structs for Frankfurter API response parsing
 #[derive(Deserialize, Debug)]
 struct FrankfurterResponse {

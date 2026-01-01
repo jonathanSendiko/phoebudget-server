@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT \n                ticker, \n                name, \n                asset_type,\n                api_ticker,\n                source,\n                current_price\n            FROM assets\n            WHERE ticker = $1\n            ",
+  "query": "\n            SELECT \n                ticker, \n                name, \n                asset_type,\n                api_ticker,\n                source,\n                current_price,\n                icon_url\n            FROM assets\n            WHERE ticker = $1\n            ",
   "describe": {
     "columns": [
       {
@@ -32,6 +32,11 @@
         "ordinal": 5,
         "name": "current_price",
         "type_info": "Numeric"
+      },
+      {
+        "ordinal": 6,
+        "name": "icon_url",
+        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -45,8 +50,9 @@
       false,
       true,
       true,
+      true,
       true
     ]
   },
-  "hash": "67e29dbcd94f815e1c88131f9f2fe6637f39ef6b0d4cf0020718a06bae149e45"
+  "hash": "c7bd4117288605a1d57338a81bc9dad0479bd1cf22a10f3de6462226c631afc8"
 }

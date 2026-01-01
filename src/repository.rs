@@ -176,11 +176,12 @@ impl TransactionRepository {
             r#"
             SELECT 
                 c.name as category, 
-                COALESCE(SUM(t.amount), 0) as "total!"
+                COALESCE(SUM(t.amount), 0) as "total!",
+                COALESCE(c.is_income, FALSE) as "is_income!"
             FROM transactions t
             JOIN categories c ON t.category_id = c.id
             WHERE t.user_id = $3 AND t.occurred_at BETWEEN $1 AND $2
-            GROUP BY c.name
+            GROUP BY c.name, c.is_income
             ORDER BY 2 DESC
             "#,
             start_date,
@@ -312,6 +313,17 @@ impl PortfolioRepository {
         Ok(())
     }
 
+    pub async fn update_asset_icon(&self, ticker: &str, icon_url: &str) -> Result<(), AppError> {
+        sqlx::query!(
+            "UPDATE assets SET icon_url = $1 WHERE ticker = $2",
+            icon_url,
+            ticker
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     pub async fn get_all_assets(&self) -> Result<Vec<crate::schemas::Asset>, AppError> {
         let rows = sqlx::query_as!(
             crate::schemas::Asset,
@@ -322,7 +334,8 @@ impl PortfolioRepository {
                 asset_type,
                 api_ticker,
                 source,
-                current_price
+                current_price,
+                icon_url
             FROM assets
             ORDER BY name
             "#
@@ -375,6 +388,7 @@ impl PortfolioRepository {
             Decimal,
             Option<String>,
             Option<String>,
+            Option<String>,
         )>,
         AppError,
     > {
@@ -387,6 +401,7 @@ impl PortfolioRepository {
             current_price: Option<Decimal>,
             source: Option<String>,
             api_ticker: Option<String>,
+            icon_url: Option<String>,
         }
 
         let rows = sqlx::query_as!(
@@ -399,7 +414,8 @@ impl PortfolioRepository {
                 p.avg_buy_price, 
                 a.current_price,
                 a.source,
-                a.api_ticker
+                a.api_ticker,
+                a.icon_url
             FROM portfolio p
             LEFT JOIN assets a ON p.ticker = a.ticker
             WHERE p.user_id = $1
@@ -421,6 +437,7 @@ impl PortfolioRepository {
                     r.current_price.unwrap_or(Decimal::ZERO),
                     r.source,
                     r.api_ticker,
+                    r.icon_url,
                 )
             })
             .collect();
@@ -438,7 +455,8 @@ impl PortfolioRepository {
                 asset_type,
                 api_ticker,
                 source,
-                current_price
+                current_price,
+                icon_url
             FROM assets
             WHERE ticker = $1
             "#,
