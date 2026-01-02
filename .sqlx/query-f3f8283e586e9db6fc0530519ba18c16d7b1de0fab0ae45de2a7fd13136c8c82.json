@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT \n                id, \n                name, \n                COALESCE(is_income, FALSE) as \"is_income!\", \n                COALESCE(icon, 'help_outline') as \"icon!\",\n                COALESCE(exclude_from_analysis, FALSE) as \"exclude_from_analysis!\"\n            FROM categories\n            WHERE name = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "is_income!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "icon!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "exclude_from_analysis!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "f3f8283e586e9db6fc0530519ba18c16d7b1de0fab0ae45de2a7fd13136c8c82"
+}

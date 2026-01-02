@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT \n                t.id, t.amount, t.description, t.category_id, t.occurred_at, t.created_at,\n                t.original_currency, t.original_amount, t.exchange_rate,\n                c.name as \"category_name?\", c.icon as category_icon, COALESCE(c.is_income, FALSE) as \"category_is_income!\"\n            FROM transactions t\n            LEFT JOIN categories c ON t.category_id = c.id\n            WHERE t.id = $1 AND t.user_id = $2\n            ",
+  "query": "\n            SELECT \n                t.id, t.amount, t.description, t.category_id, t.occurred_at, t.created_at,\n                t.original_currency, t.original_amount, t.exchange_rate,\n                c.name as \"category_name?\", c.icon as category_icon, \n                COALESCE(c.is_income, FALSE) as \"category_is_income!\",\n                COALESCE(c.exclude_from_analysis, FALSE) as \"category_exclude!\"\n            FROM transactions t\n            LEFT JOIN categories c ON t.category_id = c.id\n            WHERE t.id = $1 AND t.user_id = $2\n            ",
   "describe": {
     "columns": [
       {
@@ -62,6 +62,11 @@
         "ordinal": 11,
         "name": "category_is_income!",
         "type_info": "Bool"
+      },
+      {
+        "ordinal": 12,
+        "name": "category_exclude!",
+        "type_info": "Bool"
       }
     ],
     "parameters": {
@@ -82,8 +87,9 @@
       true,
       false,
       true,
+      null,
       null
     ]
   },
-  "hash": "475747cfde84ea70efeb1920097684d26b5d498cff0d645210c3e37e0be1a278"
+  "hash": "3d4ebe88afb7a518bd2ed91388ef1fa98d92be86f7ef7a616fb340ac4791f182"
 }
