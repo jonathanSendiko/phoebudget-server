@@ -10,9 +10,10 @@ use crate::repository::{PortfolioRepository, SettingsRepository};
 use crate::response::ApiResponse;
 use crate::schemas::{
     AuthResponse, Category, CreatePocket, CreatePortfolioItem, CreateTransaction, DateRangeParams,
-    FinancialHealth, LoginRequest, PaginatedTransactions, Pocket, PocketId, RegisterRequest,
-    SpendingAnalysisResponse, TransactionDetail, TransactionId, TransactionQueryParams,
-    UpdateCurrency, UpdateInvestment, UpdatePocket, UpdateTransaction, UserProfile,
+    FinancialHealth, LoginRequest, PaginatedTransactions, Pocket, PocketId, RefreshTokenRequest,
+    RegisterRequest, SpendingAnalysisResponse, TransactionDetail, TransactionId,
+    TransactionQueryParams, TransferRequest, UpdateCurrency, UpdateInvestment, UpdatePocket,
+    UpdateTransaction, UserProfile,
 };
 
 // --- Auth Handlers ---
@@ -30,6 +31,17 @@ pub async fn login(
     Json(payload): Json<LoginRequest>,
 ) -> Result<Json<ApiResponse<AuthResponse>>, AppError> {
     let response = state.auth_service().login(payload).await?;
+    Ok(Json(ApiResponse::success(response, None)))
+}
+
+pub async fn refresh_token(
+    State(state): State<AppState>,
+    Json(payload): Json<RefreshTokenRequest>,
+) -> Result<Json<ApiResponse<AuthResponse>>, AppError> {
+    let response = state
+        .auth_service()
+        .refresh_access(&payload.refresh_token)
+        .await?;
     Ok(Json(ApiResponse::success(response, None)))
 }
 
@@ -316,6 +328,21 @@ pub async fn delete_pocket(
         .await?;
     Ok(Json(ApiResponse::success(
         "Pocket deleted".to_string(),
+        None,
+    )))
+}
+
+pub async fn transfer_funds(
+    State(state): State<AppState>,
+    user_id: UserId,
+    Json(payload): Json<TransferRequest>,
+) -> Result<Json<ApiResponse<String>>, AppError> {
+    state
+        .transaction_service()
+        .transfer_funds(user_id.0, payload)
+        .await?;
+    Ok(Json(ApiResponse::success(
+        "Transfer successful".to_string(),
         None,
     )))
 }

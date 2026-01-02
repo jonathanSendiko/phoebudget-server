@@ -75,6 +75,7 @@ impl AppState {
             repository::UserRepository::new(self.db.clone()),
             repository::SettingsRepository::new(self.db.clone()),
             repository::PocketRepository::new(self.db.clone()),
+            repository::RefreshTokenRepository::new(self.db.clone()),
         )
     }
 
@@ -163,6 +164,7 @@ async fn main() {
     let api_routes = Router::new()
         .route("/auth/register", post(handlers::register))
         .route("/auth/login", post(handlers::login))
+        .route("/auth/refresh", post(handlers::refresh_token))
         .route(
             "/transactions",
             post(handlers::create_transaction).get(handlers::get_transactions),
@@ -201,7 +203,8 @@ async fn main() {
             get(handlers::get_pocket)
                 .put(handlers::update_pocket)
                 .delete(handlers::delete_pocket),
-        );
+        )
+        .route("/pockets/transfer", post(handlers::transfer_funds));
 
     let app = Router::new()
         .route("/", get(health_check))
@@ -210,7 +213,9 @@ async fn main() {
         .layer(middleware::from_fn(print_request_response))
         .with_state(state);
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
+    let port = std::env::var("PORT").unwrap_or_else(|_| "3000".to_string());
+    let port = port.parse::<u16>().expect("Invalid PORT");
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
     println!("Server listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();

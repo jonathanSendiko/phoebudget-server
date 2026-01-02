@@ -275,7 +275,24 @@ pub struct LoginRequest {
 #[derive(Serialize, Debug)]
 pub struct AuthResponse {
     pub token: String,
+    pub refresh_token: String,
     pub message: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct RefreshTokenRequest {
+    pub refresh_token: String,
+}
+
+#[derive(Serialize, Debug, sqlx::FromRow)]
+pub struct RefreshTokenRow {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub token_hash: String,
+    pub expires_at: DateTime<Utc>,
+    pub created_at: Option<DateTime<Utc>>,
+    pub replaced_by: Option<String>,
+    pub is_revoked: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -291,12 +308,22 @@ pub struct Asset {
     pub icon_url: Option<String>,
 }
 
+#[derive(Deserialize, Debug)]
+pub struct TransferRequest {
+    pub source_pocket_id: Uuid,
+    pub destination_pocket_id: Uuid,
+    pub amount: Decimal,
+    pub description: Option<String>,
+}
+
 #[derive(Serialize, Debug, sqlx::FromRow)]
 pub struct Category {
     pub id: i32,
     pub name: String,
     pub is_income: bool,
     pub icon: String,
+    #[serde(default)]
+    pub exclude_from_analysis: bool,
 }
 
 /// Internal struct for portfolio data joined with asset info (from repository)

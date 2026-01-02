@@ -79,6 +79,75 @@ impl UserRepository {
     }
 }
 
+pub struct RefreshTokenRepository {
+    pool: PgPool,
+}
+
+impl RefreshTokenRepository {
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+
+    pub async fn create(
+        &self,
+        user_id: Uuid,
+        token_hash: &str,
+        expires_at: DateTime<Utc>,
+    ) -> Result<Uuid, AppError> {
+        let id = sqlx::query_scalar!(
+            "INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3) RETURNING id",
+            user_id,
+            token_hash,
+            expires_at
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(id)
+    }
+
+    pub async fn find_by_hash_and_user(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<crate::schemas::RefreshTokenRow>, AppError> {
+        // Need a schema for this
+        let row = sqlx::query_as!(
+            crate::schemas::RefreshTokenRow,
+            r#"
+            SELECT id, user_id, token_hash, expires_at, created_at, replaced_by, is_revoked
+            FROM refresh_tokens
+            WHERE token_hash = $1
+            "#,
+            token_hash
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row)
+    }
+
+    /// Revoke a specific token by setting replaced_by (rotation)
+    pub async fn rotate(&self, old_id: Uuid, new_hash: &str) -> Result<(), AppError> {
+        sqlx::query!(
+            "UPDATE refresh_tokens SET replaced_by = $1 WHERE id = $2",
+            new_hash,
+            old_id
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Revoke all tokens for a user (security breach)
+    pub async fn revoke_all_for_user(&self, user_id: Uuid) -> Result<(), AppError> {
+        sqlx::query!(
+            "UPDATE refresh_tokens SET is_revoked = TRUE WHERE user_id = $1",
+            user_id
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+}
+
 pub struct TransactionRepository {
     pool: PgPool,
 }
@@ -92,7 +161,12 @@ impl TransactionRepository {
         let categories = sqlx::query_as!(
             Category,
             r#"
-            SELECT id, name, COALESCE(is_income, FALSE) as "is_income!", COALESCE(icon, 'help_outline') as "icon!"
+            SELECT 
+                id, 
+                name, 
+                COALESCE(is_income, FALSE) as "is_income!", 
+                COALESCE(icon, 'help_outline') as "icon!",
+                COALESCE(exclude_from_analysis, FALSE) as "exclude_from_analysis!"
             FROM categories
             ORDER BY name ASC
             "#
@@ -100,6 +174,30 @@ impl TransactionRepository {
         .fetch_all(&self.pool)
         .await?;
         Ok(categories)
+    }
+
+    pub async fn get_category_by_name(&self, name: &str) -> Result<Category, AppError> {
+        let category = sqlx::query_as!(
+            Category,
+            r#"
+            SELECT 
+                id, 
+                name, 
+                COALESCE(is_income, FALSE) as "is_income!", 
+                COALESCE(icon, 'help_outline') as "icon!",
+                COALESCE(exclude_from_analysis, FALSE) as "exclude_from_analysis!"
+            FROM categories
+            WHERE name = $1
+            "#,
+            name
+        )
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(AppError::NotFoundError(format!(
+            "Category '{}' not found",
+            name
+        )))?;
+        Ok(category)
     }
 
     pub async fn create(
@@ -152,6 +250,7 @@ impl TransactionRepository {
             SELECT 
                 t.id, t.amount, t.description, t.category_id, t.occurred_at, t.created_at,
                 c.name as "category_name?", c.icon as category_icon, COALESCE(c.is_income, FALSE) as "category_is_income!",
+                COALESCE(c.exclude_from_analysis, FALSE) as "category_exclude!",
                 p.id as "pocket_id?", p.name as "pocket_name?", p.icon as "pocket_icon?"
             FROM transactions t
             LEFT JOIN categories c ON t.category_id = c.id
@@ -182,6 +281,7 @@ impl TransactionRepository {
                 name: row.category_name.unwrap_or_default(),
                 is_income: row.category_is_income,
                 icon: row.category_icon.unwrap_or_else(|| "help_outline".to_string()),
+                exclude_from_analysis: row.category_exclude,
             }),
             pocket: row.pocket_id.map(|id| PocketSummary {
                 id,
@@ -233,7 +333,9 @@ impl TransactionRepository {
             SELECT 
                 t.id, t.amount, t.description, t.category_id, t.occurred_at, t.created_at,
                 t.original_currency, t.original_amount, t.exchange_rate,
-                c.name as "category_name?", c.icon as category_icon, COALESCE(c.is_income, FALSE) as "category_is_income!"
+                c.name as "category_name?", c.icon as category_icon, 
+                COALESCE(c.is_income, FALSE) as "category_is_income!",
+                COALESCE(c.exclude_from_analysis, FALSE) as "category_exclude!"
             FROM transactions t
             LEFT JOIN categories c ON t.category_id = c.id
             WHERE t.id = $1 AND t.user_id = $2
@@ -256,6 +358,7 @@ impl TransactionRepository {
                 icon: row
                     .category_icon
                     .unwrap_or_else(|| "help_outline".to_string()),
+                exclude_from_analysis: row.category_exclude,
             }),
             occurred_at: row.occurred_at,
             created_at: row.created_at,
@@ -281,7 +384,9 @@ impl TransactionRepository {
                 COALESCE(c.icon, 'help_outline') as "icon!"
             FROM transactions t
             JOIN categories c ON t.category_id = c.id
-            WHERE t.user_id = $3 AND t.occurred_at BETWEEN $1 AND $2
+            WHERE t.user_id = $3 
+              AND t.occurred_at BETWEEN $1 AND $2
+              AND (c.exclude_from_analysis = FALSE OR c.exclude_from_analysis IS NULL)
             GROUP BY c.name, c.is_income, c.icon
             ORDER BY 2 DESC
             "#,

@@ -17,10 +17,13 @@ use crate::schemas::{
 
 use jsonwebtoken::{Header, encode};
 
+use sha2::{Digest, Sha256};
+
 pub struct AuthService {
     user_repo: UserRepository,
     settings_repo: SettingsRepository,
     pocket_repo: PocketRepository,
+    refresh_token_repo: crate::repository::RefreshTokenRepository,
 }
 
 impl AuthService {
@@ -28,11 +31,13 @@ impl AuthService {
         user_repo: UserRepository,
         settings_repo: SettingsRepository,
         pocket_repo: PocketRepository,
+        refresh_token_repo: crate::repository::RefreshTokenRepository,
     ) -> Self {
         Self {
             user_repo,
             settings_repo,
             pocket_repo,
+            refresh_token_repo,
         }
     }
 
@@ -72,10 +77,11 @@ impl AuthService {
         self.pocket_repo.create_default_for_user(user_id).await?;
 
         // Auto-login (generate token)
-        let token = self.generate_token(user_id)?;
+        let (token, refresh_token) = self.generate_tokens(user_id).await?;
 
         Ok(AuthResponse {
             token,
+            refresh_token,
             message: "Registration successful".to_string(),
         })
     }
@@ -91,19 +97,99 @@ impl AuthService {
             return Err(AppError::AuthError("Invalid credentials".to_string()));
         }
 
-        let token = self.generate_token(user.id)?;
+        let (token, refresh_token) = self.generate_tokens(user.id).await?;
 
         Ok(AuthResponse {
             token,
+            refresh_token,
             message: "Login successful".to_string(),
         })
     }
 
-    fn generate_token(&self, user_id: Uuid) -> Result<String, AppError> {
+    pub async fn refresh_access(&self, refresh_token: &str) -> Result<AuthResponse, AppError> {
+        // 1. Hash the incoming token
+        let mut hasher = Sha256::new();
+        hasher.update(refresh_token.as_bytes());
+        let hash = hex::encode(hasher.finalize());
+
+        // 2. Find in DB
+        let token_row = self
+            .refresh_token_repo
+            .find_by_hash_and_user(&hash)
+            .await?
+            .ok_or(AppError::AuthError("Invalid refresh token".to_string()))?;
+
+        // 3. Security checks
+        if token_row.is_revoked.unwrap_or(false) {
+            // Already revoked explicitly
+            return Err(AppError::AuthError("Token revoked".to_string()));
+        }
+
+        if let Some(_replacement) = token_row.replaced_by {
+            // REUSE DETECTED!
+            // This token was already rotated. Someone is trying to use an old token.
+            // Revoke EVERYTHING for this user.
+            tracing::warn!(
+                "Refresh token reuse detected for user {}. Revoking all sessions.",
+                token_row.user_id
+            );
+            self.refresh_token_repo
+                .revoke_all_for_user(token_row.user_id)
+                .await?;
+            return Err(AppError::AuthError(
+                "Security alert: Token reuse detected".to_string(),
+            ));
+        }
+
+        if token_row.expires_at < Utc::now() {
+            return Err(AppError::AuthError("Token expired".to_string()));
+        }
+
+        // 4. Rotate: Generate new pair, mark old as replaced
+        let (new_access_token, new_refresh_token) = self.generate_tokens(token_row.user_id).await?;
+
+        // Calculate hash of new token to link
+        let mut new_hasher = Sha256::new();
+        new_hasher.update(new_refresh_token.as_bytes());
+        let new_hash = hex::encode(new_hasher.finalize());
+
+        self.refresh_token_repo
+            .rotate(token_row.id, &new_hash)
+            .await?;
+
+        Ok(AuthResponse {
+            token: new_access_token,
+            refresh_token: new_refresh_token,
+            message: "Token refreshed".to_string(),
+        })
+    }
+
+    async fn generate_tokens(&self, user_id: Uuid) -> Result<(String, String), AppError> {
+        // JWT
+        let access_token = self.generate_jwt(user_id)?;
+
+        // Refresh Token (64 char hex string from 2 UUIDs)
+        let refresh_token = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+
+        // Hash it
+        let mut hasher = Sha256::new();
+        hasher.update(refresh_token.as_bytes());
+        let hash = hex::encode(hasher.finalize());
+
+        // Save to DB (expires in 7 days)
+        let expires_at = Utc::now() + chrono::Duration::days(7);
+        self.refresh_token_repo
+            .create(user_id, &hash, expires_at)
+            .await?;
+
+        Ok((access_token, refresh_token))
+    }
+
+    fn generate_jwt(&self, user_id: Uuid) -> Result<String, AppError> {
         let claims = Claims {
             sub: user_id.to_string(),
             company: "Phoebudget".to_string(),
-            exp: (Utc::now() + chrono::Duration::hours(24)).timestamp() as usize,
+            exp: (Utc::now() + chrono::Duration::hours(1)).timestamp() as usize, // Reduced to 1 hour
         };
 
         encode(&Header::default(), &claims, &get_keys().encoding)
@@ -314,6 +400,84 @@ impl TransactionService {
         id: Uuid,
     ) -> Result<TransactionDetail, AppError> {
         self.transaction_repo.get_transaction(id, user_id).await
+    }
+
+    pub async fn transfer_funds(
+        &self,
+        user_id: Uuid,
+        req: crate::schemas::TransferRequest,
+    ) -> Result<(), AppError> {
+        if req.amount <= Decimal::ZERO {
+            return Err(AppError::ValidationError(
+                "Transfer amount must be positive".to_string(),
+            ));
+        }
+
+        if req.source_pocket_id == req.destination_pocket_id {
+            return Err(AppError::ValidationError(
+                "Cannot transfer to the same pocket".to_string(),
+            ));
+        }
+
+        // Verify pockets exist and belong to user
+        let _source_pocket = self
+            .pocket_repo
+            .get_by_id(req.source_pocket_id, user_id)
+            .await?;
+        let _dest_pocket = self
+            .pocket_repo
+            .get_by_id(req.destination_pocket_id, user_id)
+            .await?;
+
+        // Get special categories
+        let cat_out = self
+            .transaction_repo
+            .get_category_by_name("Transfer Out")
+            .await?;
+        let cat_in = self
+            .transaction_repo
+            .get_category_by_name("Transfer In")
+            .await?;
+
+        // 1. Withdraw from Source
+        self.transaction_repo
+            .create(
+                user_id,
+                -req.amount, // Negative amount for expense
+                Some(
+                    req.description
+                        .clone()
+                        .unwrap_or_else(|| "Transfer Out".to_string()),
+                ),
+                cat_out.id,
+                Utc::now(),
+                None,
+                None,
+                None,
+                req.source_pocket_id,
+            )
+            .await?;
+
+        // 2. Deposit to Destination
+        self.transaction_repo
+            .create(
+                user_id,
+                req.amount, // Positive amount for income
+                Some(
+                    req.description
+                        .clone()
+                        .unwrap_or_else(|| "Transfer In".to_string()),
+                ),
+                cat_in.id,
+                Utc::now(),
+                None,
+                None,
+                None,
+                req.destination_pocket_id,
+            )
+            .await?;
+
+        Ok(())
     }
 }
 
