@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT COUNT(*) as \"count!\"\n            FROM transactions t\n            WHERE t.user_id = $3 \n              AND t.deleted_at IS NULL\n              AND ($1::timestamptz IS NULL OR t.occurred_at >= $1)\n              AND ($2::timestamptz IS NULL OR t.occurred_at <= $2)\n              AND ($4::uuid IS NULL OR t.pocket_id = $4)\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Timestamptz",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "f2e4779f7176dc8e9d9d16e953654fbf65af82ec187bb61229e1564709aa1510"
+}

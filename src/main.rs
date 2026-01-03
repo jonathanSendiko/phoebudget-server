@@ -175,6 +175,10 @@ async fn main() {
                 .delete(handlers::delete_transaction)
                 .get(handlers::get_transaction),
         )
+        .route(
+            "/transactions/{id}/restore",
+            post(handlers::restore_transaction),
+        )
         .route("/settings/currency", put(handlers::update_base_currency))
         .route(
             "/settings/currencies",

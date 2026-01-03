@@ -101,6 +101,21 @@ pub async fn delete_transaction(
     )))
 }
 
+pub async fn restore_transaction(
+    State(state): State<AppState>,
+    user_id: UserId,
+    path: axum::extract::Path<uuid::Uuid>,
+) -> Result<Json<ApiResponse<String>>, AppError> {
+    state
+        .transaction_service()
+        .restore_transaction(path.0, user_id.0)
+        .await?;
+    Ok(Json(ApiResponse::success(
+        "Transaction restored".to_string(),
+        None,
+    )))
+}
+
 pub async fn get_transactions(
     State(state): State<AppState>,
     user_id: UserId,

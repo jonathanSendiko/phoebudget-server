@@ -256,6 +256,7 @@ impl TransactionRepository {
             LEFT JOIN categories c ON t.category_id = c.id
             LEFT JOIN pockets p ON t.pocket_id = p.id
             WHERE t.user_id = $3 
+              AND t.deleted_at IS NULL
               AND ($1::timestamptz IS NULL OR t.occurred_at >= $1)
               AND ($2::timestamptz IS NULL OR t.occurred_at <= $2)
               AND ($4::uuid IS NULL OR t.pocket_id = $4)
@@ -308,6 +309,7 @@ impl TransactionRepository {
             SELECT COUNT(*) as "count!"
             FROM transactions t
             WHERE t.user_id = $3 
+              AND t.deleted_at IS NULL
               AND ($1::timestamptz IS NULL OR t.occurred_at >= $1)
               AND ($2::timestamptz IS NULL OR t.occurred_at <= $2)
               AND ($4::uuid IS NULL OR t.pocket_id = $4)
@@ -338,7 +340,7 @@ impl TransactionRepository {
                 COALESCE(c.exclude_from_analysis, FALSE) as "category_exclude!"
             FROM transactions t
             LEFT JOIN categories c ON t.category_id = c.id
-            WHERE t.id = $1 AND t.user_id = $2
+            WHERE t.id = $1 AND t.user_id = $2 AND t.deleted_at IS NULL
             "#,
             id,
             user_id
@@ -386,6 +388,7 @@ impl TransactionRepository {
             JOIN categories c ON t.category_id = c.id
             WHERE t.user_id = $3 
               AND t.occurred_at BETWEEN $1 AND $2
+              AND t.deleted_at IS NULL
               AND (c.exclude_from_analysis = FALSE OR c.exclude_from_analysis IS NULL)
             GROUP BY c.name, c.is_income, c.icon
             ORDER BY 2 DESC
@@ -444,7 +447,18 @@ impl TransactionRepository {
 
     pub async fn delete(&self, id: Uuid, user_id: Uuid) -> Result<u64, AppError> {
         let result = sqlx::query!(
-            "DELETE FROM transactions WHERE id = $1 AND user_id = $2",
+            "UPDATE transactions SET deleted_at = NOW() WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL",
+            id,
+            user_id
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected())
+    }
+
+    pub async fn restore(&self, id: Uuid, user_id: Uuid) -> Result<u64, AppError> {
+        let result = sqlx::query!(
+            "UPDATE transactions SET deleted_at = NULL WHERE id = $1 AND user_id = $2",
             id,
             user_id
         )
@@ -464,7 +478,7 @@ impl TransactionRepository {
                 ), 0) as "net_cash!"
             FROM transactions t
             JOIN categories c ON t.category_id = c.id
-            WHERE t.user_id = $1
+            WHERE t.user_id = $1 AND t.deleted_at IS NULL
             "#,
             user_id
         )

@@ -394,6 +394,14 @@ impl TransactionService {
         }
         Ok(())
     }
+
+    pub async fn restore_transaction(&self, id: Uuid, user_id: Uuid) -> Result<(), AppError> {
+        let restored = self.transaction_repo.restore(id, user_id).await?;
+        if restored == 0 {
+            return Err(AppError::NotFoundError("Transaction not found".to_string()));
+        }
+        Ok(())
+    }
     pub async fn get_transaction(
         &self,
         user_id: Uuid,
