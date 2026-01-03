@@ -437,6 +437,17 @@ impl TransactionService {
             .get_by_id(req.destination_pocket_id, user_id)
             .await?;
 
+        // Check source pocket has sufficient balance
+        let source_balance = self
+            .transaction_repo
+            .get_pocket_balance(user_id, req.source_pocket_id)
+            .await?;
+        if source_balance < req.amount {
+            return Err(AppError::ValidationError(
+                "Insufficient funds in source pocket".to_string(),
+            ));
+        }
+
         // Get special categories
         let cat_out = self
             .transaction_repo
@@ -451,7 +462,7 @@ impl TransactionService {
         self.transaction_repo
             .create(
                 user_id,
-                -req.amount, // Negative amount for expense
+                req.amount, // Positive amount (category indicates it's an outflow)
                 Some(
                     req.description
                         .clone()

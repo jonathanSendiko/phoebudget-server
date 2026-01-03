@@ -486,6 +486,31 @@ impl TransactionRepository {
         .await?;
         Ok(result.net_cash)
     }
+
+    pub async fn get_pocket_balance(
+        &self,
+        user_id: Uuid,
+        pocket_id: Uuid,
+    ) -> Result<Decimal, AppError> {
+        let result = sqlx::query!(
+            r#"
+            SELECT 
+                COALESCE(SUM(
+                    CASE WHEN c.is_income THEN t.amount 
+                    ELSE -t.amount 
+                    END
+                ), 0) as "balance!"
+            FROM transactions t
+            JOIN categories c ON t.category_id = c.id
+            WHERE t.user_id = $1 AND t.pocket_id = $2 AND t.deleted_at IS NULL
+            "#,
+            user_id,
+            pocket_id
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(result.balance)
+    }
 }
 
 pub struct PortfolioRepository {
