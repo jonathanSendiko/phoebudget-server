@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT \n                COALESCE(SUM(\n                    CASE WHEN c.is_income THEN t.amount \n                    ELSE -t.amount \n                    END\n                ), 0) as \"balance!\"\n            FROM transactions t\n            JOIN categories c ON t.category_id = c.id\n            WHERE t.user_id = $1 AND t.pocket_id = $2 AND t.deleted_at IS NULL\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "balance!",
+        "type_info": "Numeric"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "ce47f359a9fca5d47dfb2ae3271fa8277d1b3869207e196ea06398e9b740f649"
+}
