@@ -19,6 +19,10 @@ use axum::{
 use http_body_util::BodyExt;
 use sqlx::postgres::PgPoolOptions;
 use std::net::SocketAddr;
+use std::time::Duration;
+use tower_governor::{
+    GovernorLayer, governor::GovernorConfigBuilder, key_extractor::SmartIpKeyExtractor,
+};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -161,6 +165,29 @@ async fn main() {
         http_client,
     };
 
+    // Configure rate limiter: 60 requests per minute per IP
+    // burst_size(60) = max requests in a burst
+    // per_second(1) = replenish 1 request per second (60 per minute)
+    let governor_conf = GovernorConfigBuilder::default()
+        .key_extractor(SmartIpKeyExtractor)
+        .per_second(1)
+        .burst_size(60)
+        .finish()
+        .expect("Failed to build rate limiter config");
+
+    // Clone the limiter for the cleanup task
+    let governor_limiter = governor_conf.limiter().clone();
+
+    // Background task to clean up stale rate limiter entries
+    let cleanup_interval = Duration::from_secs(60);
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(cleanup_interval).await;
+            tracing::debug!("Rate limiter storage size: {}", governor_limiter.len());
+            governor_limiter.retain_recent();
+        }
+    });
+
     let api_routes = Router::new()
         .route("/auth/register", post(handlers::register))
         .route("/auth/login", post(handlers::login))
@@ -208,7 +235,8 @@ async fn main() {
                 .put(handlers::update_pocket)
                 .delete(handlers::delete_pocket),
         )
-        .route("/pockets/transfer", post(handlers::transfer_funds));
+        .route("/pockets/transfer", post(handlers::transfer_funds))
+        .layer(GovernorLayer::new(governor_conf));
 
     let app = Router::new()
         .route("/", get(health_check))
@@ -223,7 +251,12 @@ async fn main() {
     println!("Server listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .unwrap();
 }
 
 async fn health_check() -> &'static str {
