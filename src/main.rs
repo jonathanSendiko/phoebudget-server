@@ -80,6 +80,7 @@ impl AppState {
             repository::SettingsRepository::new(self.db.clone()),
             repository::PocketRepository::new(self.db.clone()),
             repository::RefreshTokenRepository::new(self.db.clone()),
+            repository::SubscriptionRepository::new(self.db.clone()),
         )
     }
 
@@ -105,6 +106,10 @@ impl AppState {
 
     pub fn pocket_service(&self) -> services::PocketService {
         services::PocketService::new(repository::PocketRepository::new(self.db.clone()))
+    }
+
+    pub fn subscription_service(&self) -> services::SubscriptionService {
+        services::SubscriptionService::new(repository::SubscriptionRepository::new(self.db.clone()))
     }
 }
 
@@ -220,6 +225,7 @@ async fn main() {
             delete(handlers::remove_investment).put(handlers::update_investment),
         )
         .route("/auth/profile", get(handlers::get_profile))
+        .route("/auth/subscription", get(handlers::get_subscription))
         .route(
             "/portfolio",
             post(handlers::add_investment).get(handlers::get_portfolio),

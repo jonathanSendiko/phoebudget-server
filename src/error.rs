@@ -26,6 +26,14 @@ pub enum AppError {
     AuthError(String),
     NotFoundError(String),
     InternalServerError(String),
+    SubscriptionLimit {
+        feature: String,
+        limit: i32,
+        current: i64,
+    },
+    PremiumRequired {
+        feature: String,
+    },
 }
 
 // Convert AppError -> HTTP Response
@@ -47,6 +55,23 @@ impl IntoResponse for AppError {
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "INT-500".to_string(),
                 msg,
+            ),
+            AppError::SubscriptionLimit {
+                feature,
+                limit,
+                current,
+            } => (
+                StatusCode::FORBIDDEN,
+                "SUBSCRIPTION_LIMIT".to_string(),
+                format!(
+                    "You have reached the maximum of {} {} on the free plan (current: {})",
+                    limit, feature, current
+                ),
+            ),
+            AppError::PremiumRequired { feature } => (
+                StatusCode::FORBIDDEN,
+                "PREMIUM_REQUIRED".to_string(),
+                format!("{} requires a premium subscription", feature),
             ),
         };
 

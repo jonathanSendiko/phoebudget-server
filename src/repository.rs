@@ -1,7 +1,7 @@
 use crate::error::AppError;
 use crate::schemas::{
-    Category, CategorySummary, CreatePortfolioItem, Pocket, PocketSummary, Transaction,
-    TransactionDetail, User, UserProfile,
+    Category, CategorySummary, CreatePortfolioItem, Pocket, PocketSummary, SubscriptionRow,
+    Transaction, TransactionDetail, User, UserProfile,
 };
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
@@ -745,6 +745,16 @@ impl PortfolioRepository {
         .await?;
         Ok(())
     }
+
+    pub async fn count_by_user(&self, user_id: Uuid) -> Result<i64, AppError> {
+        let result = sqlx::query!(
+            r#"SELECT COUNT(*) as "count!" FROM portfolio WHERE user_id = $1"#,
+            user_id
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(result.count)
+    }
 }
 
 pub struct PocketRepository {
@@ -903,6 +913,16 @@ impl PocketRepository {
         .await?;
         Ok(result.rows_affected())
     }
+
+    pub async fn count_by_user(&self, user_id: Uuid) -> Result<i64, AppError> {
+        let result = sqlx::query!(
+            r#"SELECT COUNT(*) as "count!" FROM pockets WHERE user_id = $1"#,
+            user_id
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(result.count)
+    }
 }
 
 pub struct SettingsRepository {
@@ -954,5 +974,46 @@ impl SettingsRepository {
             .fetch_all(&self.pool)
             .await?;
         Ok(rows.into_iter().map(|r| r.code).collect())
+    }
+}
+
+pub struct SubscriptionRepository {
+    pool: PgPool,
+}
+
+impl SubscriptionRepository {
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+
+    pub async fn get_by_user(&self, user_id: Uuid) -> Result<Option<SubscriptionRow>, AppError> {
+        let row = sqlx::query_as!(
+            SubscriptionRow,
+            r#"
+            SELECT 
+                id, user_id, plan, status, started_at, expires_at, 
+                payment_provider, external_subscription_id
+            FROM subscriptions
+            WHERE user_id = $1
+            "#,
+            user_id
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row)
+    }
+
+    pub async fn create_default(&self, user_id: Uuid) -> Result<Uuid, AppError> {
+        let id = sqlx::query_scalar!(
+            r#"
+            INSERT INTO subscriptions (user_id, plan, status)
+            VALUES ($1, 'free', 'active')
+            RETURNING id
+            "#,
+            user_id
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(id)
     }
 }

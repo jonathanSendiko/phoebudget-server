@@ -11,9 +11,9 @@ use crate::response::ApiResponse;
 use crate::schemas::{
     AuthResponse, Category, CreatePocket, CreatePortfolioItem, CreateTransaction, DateRangeParams,
     FinancialHealth, LoginRequest, PaginatedTransactions, Pocket, PocketId, RefreshTokenRequest,
-    RegisterRequest, SpendingAnalysisResponse, TransactionDetail, TransactionId,
-    TransactionQueryParams, TransferRequest, UpdateCurrency, UpdateInvestment, UpdatePocket,
-    UpdateTransaction, UserProfile,
+    RegisterRequest, SpendingAnalysisResponse, SubscriptionResponse, TransactionDetail,
+    TransactionId, TransactionQueryParams, TransferRequest, UpdateCurrency, UpdateInvestment,
+    UpdatePocket, UpdateTransaction, UserProfile,
 };
 
 // --- Auth Handlers ---
@@ -51,6 +51,17 @@ pub async fn get_profile(
 ) -> Result<Json<ApiResponse<UserProfile>>, AppError> {
     let profile = state.auth_service().get_profile(user_id.0).await?;
     Ok(Json(ApiResponse::success(profile, None)))
+}
+
+pub async fn get_subscription(
+    State(state): State<AppState>,
+    user_id: UserId,
+) -> Result<Json<ApiResponse<SubscriptionResponse>>, AppError> {
+    let subscription = state
+        .subscription_service()
+        .get_subscription(user_id.0)
+        .await?;
+    Ok(Json(ApiResponse::success(subscription, None)))
 }
 
 // --- Transaction Handlers ---
