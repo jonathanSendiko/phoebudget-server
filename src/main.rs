@@ -105,7 +105,10 @@ impl AppState {
     }
 
     pub fn pocket_service(&self) -> services::PocketService {
-        services::PocketService::new(repository::PocketRepository::new(self.db.clone()))
+        services::PocketService::new(
+            repository::PocketRepository::new(self.db.clone()),
+            repository::TransactionRepository::new(self.db.clone()),
+        )
     }
 
     pub fn subscription_service(&self) -> services::SubscriptionService {

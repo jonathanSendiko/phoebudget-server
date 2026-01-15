@@ -146,6 +146,19 @@ pub struct Pocket {
     pub created_at: Option<DateTime<Utc>>,
 }
 
+/// Detailed pocket info including balance (for get_pocket endpoint)
+#[derive(Serialize, Debug)]
+pub struct PocketDetail {
+    pub id: Uuid,
+    pub name: String,
+    pub description: Option<String>,
+    pub icon: String,
+    pub is_default: bool,
+    pub created_at: Option<DateTime<Utc>>,
+    #[serde(serialize_with = "round_currency")]
+    pub balance: Decimal,
+}
+
 /// Lightweight pocket info for embedding in transactions
 #[derive(Serialize, Debug, Clone)]
 pub struct PocketSummary {

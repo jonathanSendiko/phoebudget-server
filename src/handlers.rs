@@ -322,7 +322,7 @@ pub async fn get_pocket(
     State(state): State<AppState>,
     user_id: UserId,
     path: axum::extract::Path<uuid::Uuid>,
-) -> Result<Json<ApiResponse<Pocket>>, AppError> {
+) -> Result<Json<ApiResponse<crate::schemas::PocketDetail>>, AppError> {
     let pocket = state.pocket_service().get_pocket(path.0, user_id.0).await?;
     Ok(Json(ApiResponse::success(pocket, None)))
 }
