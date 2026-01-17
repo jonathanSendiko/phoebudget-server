@@ -242,9 +242,13 @@ impl TransactionRepository {
         start_date: Option<DateTime<Utc>>,
         end_date: Option<DateTime<Utc>>,
         pocket_id: Option<Uuid>,
+        search: Option<String>,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<Transaction>, AppError> {
+        // Prepare search pattern for ILIKE (case-insensitive)
+        let search_pattern = search.map(|s| format!("%{}%", s));
+
         let transactions = sqlx::query!(
             r#"
             SELECT 
@@ -260,13 +264,15 @@ impl TransactionRepository {
               AND ($1::timestamptz IS NULL OR t.occurred_at >= $1)
               AND ($2::timestamptz IS NULL OR t.occurred_at <= $2)
               AND ($4::uuid IS NULL OR t.pocket_id = $4)
+              AND ($5::text IS NULL OR t.description ILIKE $5)
             ORDER BY t.occurred_at DESC
-            LIMIT $5 OFFSET $6
+            LIMIT $6 OFFSET $7
             "#,
             start_date,
             end_date,
             user_id,
             pocket_id,
+            search_pattern,
             limit,
             offset
         )
@@ -303,7 +309,11 @@ impl TransactionRepository {
         start_date: Option<DateTime<Utc>>,
         end_date: Option<DateTime<Utc>>,
         pocket_id: Option<Uuid>,
+        search: Option<String>,
     ) -> Result<i64, AppError> {
+        // Prepare search pattern for ILIKE (case-insensitive)
+        let search_pattern = search.map(|s| format!("%{}%", s));
+
         let result = sqlx::query!(
             r#"
             SELECT COUNT(*) as "count!"
@@ -313,11 +323,13 @@ impl TransactionRepository {
               AND ($1::timestamptz IS NULL OR t.occurred_at >= $1)
               AND ($2::timestamptz IS NULL OR t.occurred_at <= $2)
               AND ($4::uuid IS NULL OR t.pocket_id = $4)
+              AND ($5::text IS NULL OR t.description ILIKE $5)
             "#,
             start_date,
             end_date,
             user_id,
-            pocket_id
+            pocket_id,
+            search_pattern
         )
         .fetch_one(&self.pool)
         .await?;

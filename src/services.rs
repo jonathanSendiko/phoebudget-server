@@ -295,6 +295,7 @@ impl TransactionService {
         start_date: Option<DateTime<Utc>>,
         end_date: Option<DateTime<Utc>>,
         pocket_id: Option<Uuid>,
+        search: Option<String>,
         page: i64,
         limit: i64,
     ) -> Result<crate::schemas::PaginatedTransactions, AppError> {
@@ -313,12 +314,20 @@ impl TransactionService {
 
         let transactions = self
             .transaction_repo
-            .find_by_user_and_date(user_id, start_date, end_date, pocket_id, limit, offset)
+            .find_by_user_and_date(
+                user_id,
+                start_date,
+                end_date,
+                pocket_id,
+                search.clone(),
+                limit,
+                offset,
+            )
             .await?;
 
         let total = self
             .transaction_repo
-            .count_by_user_and_date(user_id, start_date, end_date, pocket_id)
+            .count_by_user_and_date(user_id, start_date, end_date, pocket_id, search)
             .await?;
 
         let total_pages = (total as f64 / limit as f64).ceil() as i64;

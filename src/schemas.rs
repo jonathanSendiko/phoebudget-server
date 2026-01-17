@@ -57,6 +57,7 @@ pub struct TransactionQueryParams {
     pub start_date: Option<DateTime<Utc>>,
     pub end_date: Option<DateTime<Utc>>,
     pub pocket_id: Option<Uuid>,
+    pub search: Option<String>,
     #[serde(default = "default_page")]
     pub page: i64,
     #[serde(default = "default_limit")]
