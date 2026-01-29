@@ -40,6 +40,40 @@ services:
     volumes:
       - redis_data:/data
 
+  # Scheduler Service
+  scheduler:
+    build: .
+    command: ./scheduler
+    restart: on-failure
+    depends_on:
+      - db
+      - redis
+    environment:
+      - DB_USERNAME=postgres
+      - DB_PASSWORD=password
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=phoebudget
+      - REDIS_URL=redis://redis:6379
+      - RUST_LOG=info
+
+  # Worker Service
+  worker:
+    build: .
+    command: ./worker
+    restart: on-failure
+    depends_on:
+      - db
+      - redis
+    environment:
+      - DB_USERNAME=postgres
+      - DB_PASSWORD=password
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=phoebudget
+      - REDIS_URL=redis://redis:6379
+      - RUST_LOG=info
+
 volumes:
   postgres_data:
   redis_data:

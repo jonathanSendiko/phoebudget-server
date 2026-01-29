@@ -57,3 +57,13 @@ Note: Usage of `build api` or `up api` is deprecated as we now have multiple ser
 ## Troubleshooting
 - **SSL Fails**: Ensure port 80 is open on your server's firewall (`sudo ufw allow 80`).
 - **DB Connection**: Check logs with `docker compose --env-file .env.prod -f docker-compose.prod.yml logs api`.
+- **Scheduler Logs**: `docker compose --env-file .env.prod -f docker-compose.prod.yml logs -f scheduler`
+- **Worker Logs**: `docker compose --env-file .env.prod -f docker-compose.prod.yml logs -f worker`
+
+## Architecture
+The application consists of 3 binaries:
+| Service | Description |
+|---------|-------------|
+| `api` | Main REST API server |
+| `scheduler` | Polls DB every hour for due subscriptions, pushes jobs to Redis |
+| `worker` | Processes subscription jobs from Redis, creates transactions |

@@ -41,9 +41,6 @@ async fn main() {
     let mut con = client.get_connection().expect("Failed to connect to Redis");
 
     let repo = UserSubscriptionRepository::new(pool.clone());
-
-    // Loop interval: 1 hour (or 10 mins for testing responsiveness? 1 hour is fine for "daily" checks, but if we want to be robust, 10 min is better)
-    // The requirement said "Every hour".
     let mut interval = time::interval(Duration::from_secs(3600));
 
     loop {
@@ -57,8 +54,6 @@ async fn main() {
                 } else {
                     tracing::info!("Found {} due subscriptions.", due_subs.len());
                     for sub in due_subs {
-                        // Push to Redis List "subscription_jobs"
-                        // We push the ID.
                         let _: () = con
                             .rpush("subscription_jobs", sub.id.to_string())
                             .expect("Redis push failed");
