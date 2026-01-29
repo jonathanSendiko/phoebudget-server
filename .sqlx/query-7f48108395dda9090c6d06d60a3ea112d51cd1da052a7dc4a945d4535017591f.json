@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE user_subscriptions\n            SET \n                name = COALESCE($3, name),\n                description = COALESCE($4, description),\n                amount = COALESCE($5, amount),\n                basis = COALESCE($6, basis),\n                billing_day = COALESCE($7, billing_day),\n                billing_month = COALESCE($8, billing_month),\n                category_id = COALESCE($9, category_id),\n                is_active = COALESCE($10, is_active),\n                pocket_id = COALESCE($11, pocket_id),\n                next_charge_date = COALESCE($12, next_charge_date),\n                updated_at = NOW()\n            WHERE id = $1 AND user_id = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Varchar",
+        "Text",
+        "Numeric",
+        "Varchar",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Bool",
+        "Uuid",
+        "Date"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7f48108395dda9090c6d06d60a3ea112d51cd1da052a7dc4a945d4535017591f"
+}

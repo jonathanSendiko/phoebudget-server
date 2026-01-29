@@ -1,22 +1,8 @@
-mod auth;
-mod error;
-mod handlers;
-mod investments;
-mod portfolio;
-mod repository;
-mod response;
-mod schemas;
-mod services;
-
 use axum::{
-    Router,
-    body::Body,
-    extract::Request,
-    middleware::{self, Next},
-    response::Response,
+    Router, middleware,
     routing::{delete, get, post, put},
 };
-use http_body_util::BodyExt;
+use phoebudget::{AppState, handlers, print_request_response};
 use sqlx::postgres::PgPoolOptions;
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -25,96 +11,6 @@ use tower_governor::{
 };
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-
-async fn print_request_response(
-    request: Request,
-    next: Next,
-) -> Result<Response, axum::http::StatusCode> {
-    let (parts, body) = request.into_parts();
-    let bytes = buffer_and_print("request", body).await?;
-    let req = Request::from_parts(parts, Body::from(bytes));
-
-    let res = next.run(req).await;
-
-    let (parts, body) = res.into_parts();
-    let bytes = buffer_and_print("response", body).await?;
-    let res = Response::from_parts(parts, Body::from(bytes));
-
-    Ok(res)
-}
-
-async fn buffer_and_print<B>(
-    direction: &str,
-    body: B,
-) -> Result<bytes::Bytes, axum::http::StatusCode>
-where
-    B: axum::body::HttpBody<Data = bytes::Bytes>,
-    B::Error: std::fmt::Display,
-{
-    let bytes = match body.collect().await {
-        Ok(collected) => collected.to_bytes(),
-        Err(_err) => {
-            return Err(axum::http::StatusCode::BAD_REQUEST);
-        }
-    };
-
-    if let Ok(body_str) = std::str::from_utf8(&bytes) {
-        tracing::debug!("{} body = {:?}", direction, body_str);
-    }
-
-    Ok(bytes)
-}
-
-#[derive(Clone)]
-pub struct AppState {
-    pub db: sqlx::PgPool,
-    pub price_cache: moka::future::Cache<String, rust_decimal::Decimal>,
-    pub exchange_rate_cache: moka::future::Cache<String, rust_decimal::Decimal>,
-    pub http_client: reqwest::Client,
-}
-
-impl AppState {
-    pub fn auth_service(&self) -> services::AuthService {
-        services::AuthService::new(
-            repository::UserRepository::new(self.db.clone()),
-            repository::SettingsRepository::new(self.db.clone()),
-            repository::PocketRepository::new(self.db.clone()),
-            repository::RefreshTokenRepository::new(self.db.clone()),
-            repository::SubscriptionRepository::new(self.db.clone()),
-        )
-    }
-
-    pub fn transaction_service(&self) -> services::TransactionService {
-        services::TransactionService::new(
-            repository::TransactionRepository::new(self.db.clone()),
-            repository::PocketRepository::new(self.db.clone()),
-            repository::SettingsRepository::new(self.db.clone()),
-            self.http_client.clone(),
-        )
-    }
-
-    pub fn finance_service(&self) -> services::FinanceService {
-        services::FinanceService::new(
-            repository::PortfolioRepository::new(self.db.clone()),
-            repository::TransactionRepository::new(self.db.clone()),
-            repository::SettingsRepository::new(self.db.clone()),
-            self.price_cache.clone(),
-            self.exchange_rate_cache.clone(),
-            self.http_client.clone(),
-        )
-    }
-
-    pub fn pocket_service(&self) -> services::PocketService {
-        services::PocketService::new(
-            repository::PocketRepository::new(self.db.clone()),
-            repository::TransactionRepository::new(self.db.clone()),
-        )
-    }
-
-    pub fn subscription_service(&self) -> services::SubscriptionService {
-        services::SubscriptionService::new(repository::SubscriptionRepository::new(self.db.clone()))
-    }
-}
 
 #[tokio::main]
 async fn main() {
@@ -134,6 +30,7 @@ async fn main() {
     let db_host = std::env::var("DB_HOST").expect("DB_HOST must be set");
     let db_port = std::env::var("DB_PORT").expect("DB_PORT must be set");
     let db_name = std::env::var("DB_NAME").expect("DB_NAME must be set");
+    let redis_url = std::env::var("REDIS_URL").expect("REDIS_URL must be set");
 
     let database_url = format!(
         "postgres://{}:{}@{}:{}/{}",
@@ -153,6 +50,9 @@ async fn main() {
         .await
         .expect("Failed to migrate database");
 
+    // Initialize Redis
+    let redis_client = redis::Client::open(redis_url).expect("Invalid Redis URL");
+
     let cache = moka::future::Cache::builder()
         .time_to_live(std::time::Duration::from_secs(3))
         .build();
@@ -171,11 +71,10 @@ async fn main() {
         price_cache: cache,
         exchange_rate_cache,
         http_client,
+        redis_client,
     };
 
     // Configure rate limiter: 60 requests per minute per IP
-    // burst_size(60) = max requests in a burst
-    // per_second(1) = replenish 1 request per second (60 per minute)
     let governor_conf = GovernorConfigBuilder::default()
         .key_extractor(SmartIpKeyExtractor)
         .per_second(1)
@@ -183,7 +82,6 @@ async fn main() {
         .finish()
         .expect("Failed to build rate limiter config");
 
-    // Clone the limiter for the cleanup task
     let governor_limiter = governor_conf.limiter().clone();
 
     // Background task to clean up stale rate limiter entries
@@ -245,10 +143,34 @@ async fn main() {
                 .delete(handlers::delete_pocket),
         )
         .route("/pockets/transfer", post(handlers::transfer_funds))
+        .route(
+            "/goals",
+            post(handlers::create_goal).get(handlers::get_goals),
+        )
+        .route(
+            "/goals/{id}",
+            get(handlers::get_goal)
+                .put(handlers::update_goal)
+                .delete(handlers::delete_goal),
+        )
+        .route(
+            "/goals/{id}/entries",
+            post(handlers::create_goal_entry).get(handlers::get_goal_entries),
+        )
+        .route(
+            "/subscriptions",
+            post(handlers::create_user_subscription).get(handlers::get_user_subscriptions),
+        )
+        .route(
+            "/subscriptions/{id}",
+            get(handlers::get_user_subscription)
+                .put(handlers::update_user_subscription)
+                .delete(handlers::delete_user_subscription),
+        )
         .layer(GovernorLayer::new(governor_conf));
 
     let app = Router::new()
-        .route("/", get(health_check))
+        .route("/", get(handlers::health_check))
         .nest("/api/v1", api_routes)
         .layer(TraceLayer::new_for_http())
         .layer(middleware::from_fn(print_request_response))
@@ -266,8 +188,4 @@ async fn main() {
     )
     .await
     .unwrap();
-}
-
-async fn health_check() -> &'static str {
-    "Phoebudget Backend is Online!"
 }

@@ -31,9 +31,56 @@ services:
       - DB_NAME=${POSTGRES_DB}
       - JWT_SECRET=${JWT_SECRET}
       - RUST_LOG=info
+      - REDIS_URL=redis://redis:6379
       # Binding to 0.0.0.0 is important inside the container
       - HOST=0.0.0.0
       - PORT=3000
+    networks:
+      - app_network
+
+  scheduler:
+    image: phoebudget-server-api # Re-use the built image
+    build: .
+    restart: always
+    depends_on:
+      - db
+      - redis
+    command: "./scheduler"
+    environment:
+      - DB_USERNAME=${POSTGRES_USER}
+      - DB_PASSWORD=${POSTGRES_PASSWORD}
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=${POSTGRES_DB}
+      - REDIS_URL=redis://redis:6379
+      - RUST_LOG=info
+    networks:
+      - app_network
+
+  worker:
+    image: phoebudget-server-api
+    build: .
+    restart: always
+    depends_on:
+      - db
+      - redis
+    command: "./worker"
+    environment:
+      - DB_USERNAME=${POSTGRES_USER}
+      - DB_PASSWORD=${POSTGRES_PASSWORD}
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=${POSTGRES_DB}
+      - REDIS_URL=redis://redis:6379
+      - RUST_LOG=info
+    networks:
+      - app_network
+
+  redis:
+    image: redis:alpine
+    restart: always
+    volumes:
+      - redis_prod_data:/data
     networks:
       - app_network
     # In production, we don't expose 3000 to the host directly; Nginx handles ingress.
@@ -77,3 +124,4 @@ networks:
 
 volumes:
   postgres_prod_data:
+  redis_prod_data:

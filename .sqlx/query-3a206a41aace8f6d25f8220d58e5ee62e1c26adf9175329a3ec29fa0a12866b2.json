@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT \n                s.id, s.name, s.amount, s.basis, s.next_charge_date, \n                COALESCE(s.is_active, TRUE) as \"is_active!\",\n                c.icon as \"category_icon?\"\n            FROM user_subscriptions s\n            LEFT JOIN categories c ON s.category_id = c.id\n            WHERE s.user_id = $1\n            ORDER BY s.next_charge_date ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "amount",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 3,
+        "name": "basis",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "next_charge_date",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 5,
+        "name": "is_active!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "category_icon?",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      null,
+      true
+    ]
+  },
+  "hash": "3a206a41aace8f6d25f8220d58e5ee62e1c26adf9175329a3ec29fa0a12866b2"
+}

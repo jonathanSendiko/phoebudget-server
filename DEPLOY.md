@@ -46,12 +46,13 @@ The `setup.sh` script will:
 ```
 
 ## 4. Updates
-To update the application after pushing new code:
+To update the application after pushing new code (this handles server, scheduler, and worker):
 ```bash
 git pull
-docker compose --env-file .env.prod -f docker-compose.prod.yml build api
-docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --no-deps api
+docker compose --env-file .env.prod -f docker-compose.prod.yml build
+docker compose --env-file .env.prod -f docker-compose.prod.yml up -d
 ```
+Note: Usage of `build api` or `up api` is deprecated as we now have multiple services (`api`, `scheduler`, `worker`) sharing the same image/build context. Just running `build` and `up -d` ensures everything is fresh.
 
 ## Troubleshooting
 - **SSL Fails**: Ensure port 80 is open on your server's firewall (`sudo ufw allow 80`).

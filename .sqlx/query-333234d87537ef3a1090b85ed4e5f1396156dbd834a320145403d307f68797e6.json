@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO financial_goals (user_id, pocket_id, name, description, target_amount, current_amount, icon)\n            VALUES ($1, $2, $3, $4, $5, $6, $7)\n            RETURNING id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Varchar",
+        "Text",
+        "Numeric",
+        "Numeric",
+        "Varchar"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "333234d87537ef3a1090b85ed4e5f1396156dbd834a320145403d307f68797e6"
+}

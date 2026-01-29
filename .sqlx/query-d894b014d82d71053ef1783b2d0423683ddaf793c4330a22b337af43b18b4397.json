@@ -1,0 +1,125 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT \n                s.id, s.name, s.description, s.amount, s.basis, \n                s.billing_day, s.billing_month, s.next_charge_date, \n                COALESCE(s.is_active, TRUE) as \"is_active!\", s.created_at,\n                p.id as \"pocket_id!\", p.name as \"pocket_name!\", COALESCE(p.icon, 'account_balance') as \"pocket_icon!\",\n                c.id as \"category_id?\", c.name as \"category_name?\", c.icon as \"category_icon?\", \n                c.is_income as \"category_is_income?\", c.exclude_from_analysis as \"category_exclude?\"\n            FROM user_subscriptions s\n            JOIN pockets p ON s.pocket_id = p.id\n            LEFT JOIN categories c ON s.category_id = c.id\n            WHERE s.id = $1 AND s.user_id = $2\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "amount",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 4,
+        "name": "basis",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "billing_day",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "billing_month",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "next_charge_date",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 8,
+        "name": "is_active!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "pocket_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 11,
+        "name": "pocket_name!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 12,
+        "name": "pocket_icon!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 13,
+        "name": "category_id?",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 14,
+        "name": "category_name?",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 15,
+        "name": "category_icon?",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 16,
+        "name": "category_is_income?",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 17,
+        "name": "category_exclude?",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      false,
+      null,
+      true,
+      false,
+      false,
+      null,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "d894b014d82d71053ef1783b2d0423683ddaf793c4330a22b337af43b18b4397"
+}

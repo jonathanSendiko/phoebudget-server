@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO user_subscriptions (\n                user_id, pocket_id, name, description, amount, \n                basis, billing_day, billing_month, category_id, next_charge_date\n            )\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)\n            RETURNING id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Varchar",
+        "Text",
+        "Numeric",
+        "Varchar",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Date"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "0c4892cf497edd87d98acc3b7ae86f3965bc07f9e80b20acb22ecf7b59957cbc"
+}

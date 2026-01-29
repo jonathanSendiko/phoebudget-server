@@ -1,7 +1,8 @@
 use axum::{
     Json,
-    extract::{Query, State},
+    extract::{Path, Query, State},
 };
+use uuid::Uuid;
 
 use crate::AppState;
 use crate::auth::UserId;
@@ -9,14 +10,20 @@ use crate::error::AppError;
 use crate::repository::{PortfolioRepository, SettingsRepository};
 use crate::response::ApiResponse;
 use crate::schemas::{
-    AuthResponse, Category, CreatePocket, CreatePortfolioItem, CreateTransaction, DateRangeParams,
-    FinancialHealth, LoginRequest, PaginatedTransactions, Pocket, PocketId, RefreshTokenRequest,
-    RegisterRequest, SpendingAnalysisResponse, SubscriptionResponse, TransactionDetail,
-    TransactionId, TransactionQueryParams, TransferRequest, UpdateCurrency, UpdateInvestment,
-    UpdatePocket, UpdateTransaction, UserProfile,
+    AuthResponse, Category, CreateGoal, CreatePocket, CreatePortfolioItem, CreateTransaction,
+    CreateUserSubscription, DateRangeParams, FinancialHealth, GoalDetail, GoalSummary,
+    LoginRequest, PaginatedTransactions, Pocket, PocketId, RefreshTokenRequest, RegisterRequest,
+    SpendingAnalysisResponse, SubscriptionResponse, TransactionDetail, TransactionId,
+    TransactionQueryParams, TransferRequest, UpdateCurrency, UpdateInvestment, UpdatePocket,
+    UpdateTransaction, UpdateUserSubscription, UserProfile, UserSubscriptionDetail,
+    UserSubscriptionSummary,
 };
 
 // --- Auth Handlers ---
+
+pub async fn health_check() -> impl axum::response::IntoResponse {
+    axum::http::StatusCode::OK
+}
 
 pub async fn register(
     State(state): State<AppState>,
@@ -372,4 +379,150 @@ pub async fn transfer_funds(
         "Transfer successful".to_string(),
         None,
     )))
+}
+
+// --- Financial Goals Handlers ---
+
+pub async fn create_goal(
+    State(state): State<AppState>,
+    user_id: UserId,
+    Json(payload): Json<CreateGoal>,
+) -> Result<Json<ApiResponse<crate::schemas::GoalId>>, AppError> {
+    let id = state.goal_service().create_goal(user_id.0, payload).await?;
+    Ok(Json(ApiResponse::success(
+        crate::schemas::GoalId { id },
+        None,
+    )))
+}
+
+pub async fn get_goals(
+    State(state): State<AppState>,
+    user_id: UserId,
+) -> Result<Json<ApiResponse<Vec<GoalSummary>>>, AppError> {
+    let goals = state.goal_service().get_goals(user_id.0).await?;
+    Ok(Json(ApiResponse::success(goals, None)))
+}
+
+pub async fn get_goal(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    user_id: UserId,
+) -> Result<Json<ApiResponse<GoalDetail>>, AppError> {
+    let goal = state.goal_service().get_goal(id, user_id.0).await?;
+    Ok(Json(ApiResponse::success(goal, None)))
+}
+
+pub async fn update_goal(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    user_id: UserId,
+    Json(payload): Json<crate::schemas::UpdateGoal>,
+) -> Result<Json<ApiResponse<()>>, AppError> {
+    state
+        .goal_service()
+        .update_goal(id, user_id.0, payload)
+        .await?;
+    Ok(Json(ApiResponse::success((), None)))
+}
+
+pub async fn delete_goal(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    user_id: UserId,
+) -> Result<Json<ApiResponse<()>>, AppError> {
+    state.goal_service().delete_goal(id, user_id.0).await?;
+    Ok(Json(ApiResponse::success((), None)))
+}
+
+pub async fn create_goal_entry(
+    State(state): State<AppState>,
+    Path(goal_id): Path<Uuid>,
+    user_id: UserId,
+    Json(payload): Json<crate::schemas::CreateGoalEntry>,
+) -> Result<Json<ApiResponse<crate::schemas::GoalId>>, AppError> {
+    let id = state
+        .goal_service()
+        .create_goal_entry(goal_id, user_id.0, payload)
+        .await?;
+    Ok(Json(ApiResponse::success(
+        crate::schemas::GoalId { id },
+        None,
+    )))
+}
+
+pub async fn get_goal_entries(
+    State(state): State<AppState>,
+    Path(goal_id): Path<Uuid>,
+    user_id: UserId,
+) -> Result<Json<ApiResponse<Vec<crate::schemas::GoalEntry>>>, AppError> {
+    let entries = state
+        .goal_service()
+        .get_goal_entries(goal_id, user_id.0)
+        .await?;
+    Ok(Json(ApiResponse::success(entries, None)))
+}
+
+// --- User Subscriptions Handlers ---
+
+pub async fn create_user_subscription(
+    State(state): State<AppState>,
+    user_id: UserId,
+    Json(payload): Json<CreateUserSubscription>,
+) -> Result<Json<ApiResponse<crate::schemas::UserSubscriptionId>>, AppError> {
+    let id = state
+        .user_subscription_service()
+        .create_subscription(user_id.0, payload)
+        .await?;
+    Ok(Json(ApiResponse::success(
+        crate::schemas::UserSubscriptionId { id },
+        None,
+    )))
+}
+
+pub async fn get_user_subscriptions(
+    State(state): State<AppState>,
+    user_id: UserId,
+) -> Result<Json<ApiResponse<Vec<UserSubscriptionSummary>>>, AppError> {
+    let subs = state
+        .user_subscription_service()
+        .get_subscriptions(user_id.0)
+        .await?;
+    Ok(Json(ApiResponse::success(subs, None)))
+}
+
+pub async fn get_user_subscription(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    user_id: UserId,
+) -> Result<Json<ApiResponse<UserSubscriptionDetail>>, AppError> {
+    let sub = state
+        .user_subscription_service()
+        .get_subscription(id, user_id.0)
+        .await?;
+    Ok(Json(ApiResponse::success(sub, None)))
+}
+
+pub async fn update_user_subscription(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    user_id: UserId,
+    Json(payload): Json<UpdateUserSubscription>,
+) -> Result<Json<ApiResponse<()>>, AppError> {
+    state
+        .user_subscription_service()
+        .update_subscription(id, user_id.0, payload)
+        .await?;
+    Ok(Json(ApiResponse::success((), None)))
+}
+
+pub async fn delete_user_subscription(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    user_id: UserId,
+) -> Result<Json<ApiResponse<()>>, AppError> {
+    state
+        .user_subscription_service()
+        .delete_subscription(id, user_id.0)
+        .await?;
+    Ok(Json(ApiResponse::success((), None)))
 }

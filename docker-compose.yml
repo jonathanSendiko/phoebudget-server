@@ -29,6 +29,17 @@ services:
       - DB_NAME=phoebudget
       - JWT_SECRET=MY_SECRETTT
       - RUST_LOG=debug
+      - REDIS_URL=redis://redis:6379
+
+  # Redis Service for Job Queue
+  redis:
+    image: redis:alpine
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
 
 volumes:
   postgres_data:
+  redis_data:

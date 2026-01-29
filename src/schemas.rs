@@ -7,9 +7,6 @@ fn round_currency<S>(x: &Decimal, s: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
 {
-    // Round to 2 decimals, then convert to a string to preserve trailing zeros (e.g., "10.50")
-    // Note: Sending as String is safest for frontend apps to avoid float precision issues.
-    // If you prefer sending a Number, remove the .to_string() part.
     s.serialize_str(&x.round_dp(2).to_string())
 }
 
@@ -388,4 +385,158 @@ pub struct SubscriptionRow {
     pub expires_at: Option<DateTime<Utc>>,
     pub payment_provider: Option<String>,
     pub external_subscription_id: Option<String>,
+}
+
+// --- Financial Goals DTOs ---
+
+#[derive(Deserialize, Debug)]
+pub struct CreateGoal {
+    pub name: String,
+    pub description: Option<String>,
+    pub target_amount: Decimal,
+    pub current_amount: Option<Decimal>, // Manual amount, default 0
+    pub pocket_id: Uuid,
+    pub icon: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct UpdateGoal {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub target_amount: Option<Decimal>,
+    pub current_amount: Option<Decimal>,
+    pub icon: Option<String>,
+}
+
+#[derive(Serialize, Debug)]
+pub struct GoalSummary {
+    pub id: Uuid,
+    pub name: String,
+    pub icon: String,
+    #[serde(serialize_with = "round_currency")]
+    pub target_amount: Decimal,
+    #[serde(serialize_with = "round_currency")]
+    pub current_amount: Decimal,
+    #[serde(serialize_with = "round_currency")]
+    pub percentage: Decimal,
+}
+
+#[derive(Serialize, Debug)]
+pub struct GoalDetail {
+    pub id: Uuid,
+    pub name: String,
+    pub description: Option<String>,
+    pub icon: String,
+    #[serde(serialize_with = "round_currency")]
+    pub target_amount: Decimal,
+    #[serde(serialize_with = "round_currency")]
+    pub current_amount: Decimal,
+    #[serde(serialize_with = "round_currency")]
+    pub percentage: Decimal,
+    pub pocket: PocketSummary,
+    pub created_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Serialize)]
+pub struct GoalId {
+    pub id: Uuid,
+}
+
+// --- Goal Entries DTOs ---
+
+#[derive(Deserialize, Debug)]
+pub struct CreateGoalEntry {
+    pub amount: Decimal,
+    pub description: Option<String>,
+    pub date: Option<DateTime<Utc>>,
+}
+
+#[derive(Serialize, Debug)]
+pub struct GoalEntry {
+    pub id: Uuid,
+    pub goal_id: Uuid,
+    #[serde(serialize_with = "round_currency")]
+    pub amount: Decimal,
+    pub description: Option<String>,
+    pub date: DateTime<Utc>,
+}
+
+// --- User Subscriptions DTOs ---
+
+#[derive(Deserialize, Debug)]
+pub struct CreateUserSubscription {
+    pub name: String,
+    pub description: Option<String>,
+    pub amount: Decimal,
+    pub basis: String, // 'monthly' or 'annually'
+    pub billing_day: i32,
+    pub billing_month: Option<i32>,
+    pub category_id: Option<i32>,
+    pub pocket_id: Uuid,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct UpdateUserSubscription {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub amount: Option<Decimal>,
+    pub basis: Option<String>,
+    pub billing_day: Option<i32>,
+    pub billing_month: Option<i32>,
+    pub category_id: Option<i32>,
+    pub is_active: Option<bool>,
+    // pocket_id cannot be changed easily as it affects future transactions? allowing it.
+    pub pocket_id: Option<Uuid>,
+}
+
+#[derive(Serialize, Debug)]
+pub struct UserSubscriptionSummary {
+    pub id: Uuid,
+    pub name: String,
+    #[serde(serialize_with = "round_currency")]
+    pub amount: Decimal,
+    pub basis: String,
+    pub next_charge_date: chrono::NaiveDate,
+    pub is_active: bool,
+    pub icon: String, // From category
+}
+
+#[derive(Serialize, Debug)]
+pub struct UserSubscriptionDetail {
+    pub id: Uuid,
+    pub name: String,
+    pub description: Option<String>,
+    #[serde(serialize_with = "round_currency")]
+    pub amount: Decimal,
+    pub basis: String,
+    pub billing_day: i32,
+    pub billing_month: Option<i32>,
+    pub next_charge_date: chrono::NaiveDate,
+    pub is_active: bool,
+    pub pocket: PocketSummary,
+    pub category: Option<Category>,
+    pub created_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Serialize)]
+pub struct UserSubscriptionId {
+    pub id: Uuid,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+pub struct UserSubscriptionRow {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub pocket_id: Uuid,
+    pub name: String,
+    pub description: Option<String>,
+    pub amount: Decimal,
+    pub basis: String,
+    pub billing_day: i32,
+    pub billing_month: Option<i32>,
+    pub category_id: Option<i32>,
+    pub is_active: Option<bool>,
+    pub next_charge_date: chrono::NaiveDate,
+    pub created_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<DateTime<Utc>>,
 }

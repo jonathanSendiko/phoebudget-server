@@ -1,0 +1,100 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT * FROM user_subscriptions WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "pocket_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "amount",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 6,
+        "name": "basis",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "billing_day",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "billing_month",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "category_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
+        "name": "is_active",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 11,
+        "name": "next_charge_date",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 12,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "6557772ac69ad25f4f363ee5d6b971f9d0aecadb92ad39de42968895ddbb6e54"
+}

@@ -1029,3 +1029,506 @@ impl SubscriptionRepository {
         Ok(id)
     }
 }
+
+pub struct GoalRepository {
+    pool: PgPool,
+}
+
+impl GoalRepository {
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+
+    pub async fn create(
+        &self,
+        user_id: Uuid,
+        pocket_id: Uuid,
+        name: &str,
+        description: Option<String>,
+        target_amount: Decimal,
+        current_amount: Option<Decimal>,
+        icon: Option<String>,
+    ) -> Result<Uuid, AppError> {
+        let icon = icon.unwrap_or_else(|| "savings".to_string());
+        let current_amount = current_amount.unwrap_or(Decimal::ZERO);
+        let id = sqlx::query_scalar!(
+            r#"
+            INSERT INTO financial_goals (user_id, pocket_id, name, description, target_amount, current_amount, icon)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            RETURNING id
+            "#,
+            user_id,
+            pocket_id,
+            name,
+            description,
+            target_amount,
+            current_amount,
+            icon
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(id)
+    }
+
+    pub async fn get_all(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Vec<crate::schemas::GoalSummary>, AppError> {
+        struct Row {
+            id: Uuid,
+            name: String,
+            icon: String,
+            target_amount: Decimal,
+            current_amount: Decimal,
+        }
+
+        let rows = sqlx::query_as!(
+            Row,
+            r#"
+            SELECT 
+                id, name, 
+                COALESCE(icon, 'savings') as "icon!", 
+                target_amount,
+                current_amount
+            FROM financial_goals
+            WHERE user_id = $1
+            ORDER BY created_at DESC
+            "#,
+            user_id
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let summaries = rows
+            .into_iter()
+            .map(|r| {
+                let percentage = if r.target_amount.is_zero() {
+                    Decimal::ZERO
+                } else {
+                    (r.current_amount / r.target_amount) * Decimal::from(100)
+                };
+
+                crate::schemas::GoalSummary {
+                    id: r.id,
+                    name: r.name,
+                    icon: r.icon,
+                    target_amount: r.target_amount,
+                    current_amount: r.current_amount,
+                    percentage,
+                }
+            })
+            .collect();
+
+        Ok(summaries)
+    }
+
+    pub async fn get_by_id(
+        &self,
+        id: Uuid,
+        user_id: Uuid,
+    ) -> Result<crate::schemas::GoalDetail, AppError> {
+        struct Row {
+            id: Uuid,
+            name: String,
+            description: Option<String>,
+            icon: String,
+            target_amount: Decimal,
+            current_amount: Decimal,
+            created_at: Option<DateTime<Utc>>,
+            pocket_id: Uuid,
+            pocket_name: String,
+            pocket_icon: String,
+        }
+
+        let row = sqlx::query_as!(
+            Row,
+            r#"
+            SELECT 
+                g.id, g.name, g.description,
+                COALESCE(g.icon, 'savings') as "icon!", 
+                g.target_amount, g.current_amount, g.created_at,
+                p.id as "pocket_id!", p.name as "pocket_name!", COALESCE(p.icon, 'account_balance') as "pocket_icon!"
+            FROM financial_goals g
+            JOIN pockets p ON g.pocket_id = p.id
+            WHERE g.id = $1 AND g.user_id = $2
+            "#,
+            id,
+            user_id
+        )
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(AppError::NotFoundError("Goal not found".to_string()))?;
+
+        let percentage = if row.target_amount.is_zero() {
+            Decimal::ZERO
+        } else {
+            (row.current_amount / row.target_amount) * Decimal::from(100)
+        };
+
+        Ok(crate::schemas::GoalDetail {
+            id: row.id,
+            name: row.name,
+            description: row.description,
+            icon: row.icon,
+            target_amount: row.target_amount,
+            current_amount: row.current_amount,
+            percentage,
+            pocket: PocketSummary {
+                id: row.pocket_id,
+                name: row.pocket_name,
+                icon: row.pocket_icon,
+            },
+            created_at: row.created_at,
+        })
+    }
+
+    pub async fn update(
+        &self,
+        id: Uuid,
+        user_id: Uuid,
+        name: Option<String>,
+        description: Option<String>,
+        target_amount: Option<Decimal>,
+        current_amount: Option<Decimal>,
+        icon: Option<String>,
+    ) -> Result<(), AppError> {
+        sqlx::query!(
+            r#"
+            UPDATE financial_goals
+            SET 
+                name = COALESCE($3, name),
+                description = COALESCE($4, description),
+                target_amount = COALESCE($5, target_amount),
+                current_amount = COALESCE($6, current_amount),
+                icon = COALESCE($7, icon),
+                updated_at = NOW()
+            WHERE id = $1 AND user_id = $2
+            "#,
+            id,
+            user_id,
+            name,
+            description,
+            target_amount,
+            current_amount,
+            icon
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn delete(&self, id: Uuid, user_id: Uuid) -> Result<u64, AppError> {
+        let result = sqlx::query!(
+            "DELETE FROM financial_goals WHERE id = $1 AND user_id = $2",
+            id,
+            user_id
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected())
+    }
+}
+
+pub struct GoalEntryRepository {
+    pool: PgPool,
+}
+
+impl GoalEntryRepository {
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+
+    pub async fn create(
+        &self,
+        goal_id: Uuid,
+        amount: Decimal,
+        description: Option<String>,
+        date: Option<DateTime<Utc>>,
+    ) -> Result<Uuid, AppError> {
+        let date = date.unwrap_or_else(Utc::now);
+        let id = sqlx::query_scalar!(
+            r#"
+            INSERT INTO goal_entries (goal_id, amount, description, date)
+            VALUES ($1, $2, $3, $4)
+            RETURNING id
+            "#,
+            goal_id,
+            amount,
+            description,
+            date
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(id)
+    }
+
+    pub async fn get_by_goal(
+        &self,
+        goal_id: Uuid,
+    ) -> Result<Vec<crate::schemas::GoalEntry>, AppError> {
+        let entries = sqlx::query_as!(
+            crate::schemas::GoalEntry,
+            r#"
+            SELECT id, goal_id, amount, description, date
+            FROM goal_entries
+            WHERE goal_id = $1
+            ORDER BY date DESC, created_at DESC
+            "#,
+            goal_id
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(entries)
+    }
+}
+
+pub struct UserSubscriptionRepository {
+    pool: PgPool,
+}
+
+impl UserSubscriptionRepository {
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+
+    pub async fn create(
+        &self,
+        user_id: Uuid,
+        pocket_id: Uuid,
+        name: &str,
+        description: Option<String>,
+        amount: Decimal,
+        basis: &str,
+        billing_day: i32,
+        billing_month: Option<i32>,
+        category_id: Option<i32>,
+        next_charge_date: chrono::NaiveDate,
+    ) -> Result<Uuid, AppError> {
+        let id = sqlx::query_scalar!(
+            r#"
+            INSERT INTO user_subscriptions (
+                user_id, pocket_id, name, description, amount, 
+                basis, billing_day, billing_month, category_id, next_charge_date
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            RETURNING id
+            "#,
+            user_id,
+            pocket_id,
+            name,
+            description,
+            amount,
+            basis,
+            billing_day,
+            billing_month,
+            category_id,
+            next_charge_date
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(id)
+    }
+
+    pub async fn get_all(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Vec<crate::schemas::UserSubscriptionSummary>, AppError> {
+        let subs = sqlx::query!(
+            r#"
+            SELECT 
+                s.id, s.name, s.amount, s.basis, s.next_charge_date, 
+                COALESCE(s.is_active, TRUE) as "is_active!",
+                c.icon as "category_icon?"
+            FROM user_subscriptions s
+            LEFT JOIN categories c ON s.category_id = c.id
+            WHERE s.user_id = $1
+            ORDER BY s.next_charge_date ASC
+            "#,
+            user_id
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let summaries = subs
+            .into_iter()
+            .map(|r| crate::schemas::UserSubscriptionSummary {
+                id: r.id,
+                name: r.name,
+                amount: r.amount,
+                basis: r.basis,
+                next_charge_date: r.next_charge_date,
+                is_active: r.is_active,
+                icon: r
+                    .category_icon
+                    .unwrap_or_else(|| "subscriptions".to_string()),
+            })
+            .collect();
+
+        Ok(summaries)
+    }
+
+    pub async fn get_by_id(
+        &self,
+        id: Uuid,
+        user_id: Uuid,
+    ) -> Result<crate::schemas::UserSubscriptionDetail, AppError> {
+        struct Row {
+            id: Uuid,
+            name: String,
+            description: Option<String>,
+            amount: Decimal,
+            basis: String,
+            billing_day: i32,
+            billing_month: Option<i32>,
+            next_charge_date: chrono::NaiveDate,
+            is_active: bool,
+            created_at: Option<DateTime<Utc>>,
+            pocket_id: Uuid,
+            pocket_name: String,
+            pocket_icon: String,
+            category_id: Option<i32>,
+            category_name: Option<String>,
+            category_icon: Option<String>,
+            category_is_income: Option<bool>,
+            category_exclude: Option<bool>,
+        }
+
+        let row = sqlx::query_as!(
+            Row,
+            r#"
+            SELECT 
+                s.id, s.name, s.description, s.amount, s.basis, 
+                s.billing_day, s.billing_month, s.next_charge_date, 
+                COALESCE(s.is_active, TRUE) as "is_active!", s.created_at,
+                p.id as "pocket_id!", p.name as "pocket_name!", COALESCE(p.icon, 'account_balance') as "pocket_icon!",
+                c.id as "category_id?", c.name as "category_name?", c.icon as "category_icon?", 
+                c.is_income as "category_is_income?", c.exclude_from_analysis as "category_exclude?"
+            FROM user_subscriptions s
+            JOIN pockets p ON s.pocket_id = p.id
+            LEFT JOIN categories c ON s.category_id = c.id
+            WHERE s.id = $1 AND s.user_id = $2
+            "#,
+            id,
+            user_id
+        )
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(AppError::NotFoundError("Subscription not found".to_string()))?;
+
+        Ok(crate::schemas::UserSubscriptionDetail {
+            id: row.id,
+            name: row.name,
+            description: row.description,
+            amount: row.amount,
+            basis: row.basis,
+            billing_day: row.billing_day,
+            billing_month: row.billing_month,
+            next_charge_date: row.next_charge_date,
+            is_active: row.is_active,
+            pocket: PocketSummary {
+                id: row.pocket_id,
+                name: row.pocket_name,
+                icon: row.pocket_icon,
+            },
+            category: row.category_id.map(|id| Category {
+                id,
+                name: row.category_name.unwrap_or_default(),
+                is_income: row.category_is_income.unwrap_or(false),
+                icon: row.category_icon.unwrap_or_default(),
+                exclude_from_analysis: row.category_exclude.unwrap_or(false),
+            }),
+            created_at: row.created_at,
+        })
+    }
+
+    pub async fn update(
+        &self,
+        id: Uuid,
+        user_id: Uuid,
+        name: Option<String>,
+        description: Option<String>,
+        amount: Option<Decimal>,
+        basis: Option<String>,
+        billing_day: Option<i32>,
+        billing_month: Option<i32>,
+        category_id: Option<i32>,
+        is_active: Option<bool>,
+        pocket_id: Option<Uuid>,
+        next_charge_date: Option<chrono::NaiveDate>,
+    ) -> Result<(), AppError> {
+        sqlx::query!(
+            r#"
+            UPDATE user_subscriptions
+            SET 
+                name = COALESCE($3, name),
+                description = COALESCE($4, description),
+                amount = COALESCE($5, amount),
+                basis = COALESCE($6, basis),
+                billing_day = COALESCE($7, billing_day),
+                billing_month = COALESCE($8, billing_month),
+                category_id = COALESCE($9, category_id),
+                is_active = COALESCE($10, is_active),
+                pocket_id = COALESCE($11, pocket_id),
+                next_charge_date = COALESCE($12, next_charge_date),
+                updated_at = NOW()
+            WHERE id = $1 AND user_id = $2
+            "#,
+            id,
+            user_id,
+            name,
+            description,
+            amount,
+            basis,
+            billing_day,
+            billing_month,
+            category_id,
+            is_active,
+            pocket_id,
+            next_charge_date
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn delete(&self, id: Uuid, user_id: Uuid) -> Result<u64, AppError> {
+        let result = sqlx::query!(
+            "DELETE FROM user_subscriptions WHERE id = $1 AND user_id = $2",
+            id,
+            user_id
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected())
+    }
+
+    pub async fn get_due_subscriptions(
+        &self,
+    ) -> Result<Vec<crate::schemas::UserSubscriptionRow>, AppError> {
+        let rows = sqlx::query_as!(
+            crate::schemas::UserSubscriptionRow,
+            r#"
+            SELECT * FROM user_subscriptions 
+            WHERE is_active = TRUE AND next_charge_date <= CURRENT_DATE
+            "#
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
+    }
+
+    pub async fn update_next_charge_date(
+        &self,
+        id: Uuid,
+        next_date: chrono::NaiveDate,
+    ) -> Result<(), AppError> {
+        sqlx::query!(
+            "UPDATE user_subscriptions SET next_charge_date = $1 WHERE id = $2",
+            next_date,
+            id
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+}

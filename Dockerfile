@@ -10,7 +10,15 @@ RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/li
 COPY Cargo.toml Cargo.lock ./
 
 # Create dummy main to cache dependencies
-RUN mkdir src && echo "fn main() {}" > src/main.rs
+# Create dummy files to satisfy all targets in Cargo.toml
+RUN mkdir -p src/bin
+RUN echo "fn main() {}" > src/main.rs
+RUN echo "" > src/lib.rs
+RUN echo "fn main() {}" > src/bin/server.rs
+RUN echo "fn main() {}" > src/bin/scheduler.rs
+RUN echo "fn main() {}" > src/bin/worker.rs
+
+# Cache dependencies
 RUN cargo build --release
 
 # Copy the source code
@@ -20,7 +28,8 @@ COPY . .
 COPY .sqlx .sqlx
 
 # Touch main.rs to force rebuild
-RUN touch src/main.rs
+# Touch main files to force rebuild
+RUN touch src/lib.rs src/bin/server.rs src/bin/scheduler.rs src/bin/worker.rs
 
 # --- FIX 3: Tell SQLx to use the offline file, not the real DB ---
 ENV SQLX_OFFLINE=true
@@ -35,10 +44,12 @@ RUN apt-get update && apt-get install -y libssl-dev ca-certificates && rm -rf /v
 
 WORKDIR /app
 
-COPY --from=builder /app/target/release/phoebudget .
+COPY --from=builder /app/target/release/server .
+COPY --from=builder /app/target/release/scheduler .
+COPY --from=builder /app/target/release/worker .
 
 # COPY .env .
 
 EXPOSE 3000
 
-CMD ["./phoebudget"]
+CMD ["./server"]

@@ -1,0 +1,77 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT \n                g.id, g.name, g.description,\n                COALESCE(g.icon, 'savings') as \"icon!\", \n                g.target_amount, g.current_amount, g.created_at,\n                p.id as \"pocket_id!\", p.name as \"pocket_name!\", COALESCE(p.icon, 'account_balance') as \"pocket_icon!\"\n            FROM financial_goals g\n            JOIN pockets p ON g.pocket_id = p.id\n            WHERE g.id = $1 AND g.user_id = $2\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "icon!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "target_amount",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 5,
+        "name": "current_amount",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "pocket_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 8,
+        "name": "pocket_name!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 9,
+        "name": "pocket_icon!",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      null,
+      false,
+      false,
+      true,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "eb35f3721ebcad4cd5b377fc1ffb5fdf94f125a27ddc8f03855ed65b0dd54256"
+}
