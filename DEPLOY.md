@@ -54,6 +54,28 @@ docker compose --env-file .env.prod -f docker-compose.prod.yml up -d
 ```
 Note: Usage of `build api` or `up api` is deprecated as we now have multiple services (`api`, `scheduler`, `worker`) sharing the same image/build context. Just running `build` and `up -d` ensures everything is fresh.
 
+> [!WARNING]
+> The above approach causes **5-15 seconds of downtime** while containers restart.
+
+### Zero-Downtime Rolling Update (Alternative)
+For production with active traffic, use staged restarts:
+```bash
+# 1. Build images first (no downtime)
+docker compose --env-file .env.prod -f docker-compose.prod.yml build
+
+# 2. Deploy worker first (least critical)
+docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --no-deps worker
+
+# 3. Then scheduler
+docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --no-deps scheduler
+
+# 4. Finally API (brief blip, but minimal)
+docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --no-deps api
+```
+
+> [!CAUTION]
+> Never use `docker compose down --volumes` in production — this deletes all database data!
+
 ## Troubleshooting
 - **SSL Fails**: Ensure port 80 is open on your server's firewall (`sudo ufw allow 80`).
 - **DB Connection**: Check logs with `docker compose --env-file .env.prod -f docker-compose.prod.yml logs api`.
