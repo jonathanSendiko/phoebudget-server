@@ -567,20 +567,30 @@ impl FinanceService {
     pub async fn get_financial_health(&self, user_id: Uuid) -> Result<FinancialHealth, AppError> {
         let base_currency = self.settings_repo.get_base_currency(user_id).await?;
         let cash = self.transaction_repo.get_net_cash(user_id).await?;
-        let invested_usd = self.portfolio_repo.get_total_invested(user_id).await?;
 
-        let rate = if base_currency != "USD" {
-            self.get_cached_exchange_rate("USD", &base_currency).await?
-        } else {
-            Decimal::new(1, 0)
-        };
+        // Use same logic as portfolio API for calculating investment value
+        let items = self.portfolio_repo.get_all_joined(user_id).await?;
 
-        let invested_converted = invested_usd * rate;
-        let net_worth = cash + invested_converted;
+        // Calculate total investment value with proper currency conversion (matching portfolio logic)
+        let mut investment_balance = Decimal::ZERO;
+        for item in &items {
+            let asset_currency = item.currency.clone().unwrap_or_else(|| "USD".to_string());
+            let rate = if asset_currency != base_currency {
+                self.get_cached_exchange_rate(&asset_currency, &base_currency)
+                    .await?
+            } else {
+                Decimal::ONE
+            };
+            // current_value = quantity * current_price * exchange_rate
+            let value_converted = item.quantity * item.current_price * rate;
+            investment_balance += value_converted;
+        }
+
+        let net_worth = cash + investment_balance;
 
         Ok(FinancialHealth {
             cash_balance: cash,
-            investment_balance: invested_converted,
+            investment_balance,
             total_net_worth: net_worth,
         })
     }
