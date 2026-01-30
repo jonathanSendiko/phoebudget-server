@@ -55,6 +55,7 @@ fn make_test_summary(
         } else {
             Decimal::ZERO
         },
+        portfolio_pct: Decimal::ZERO, // Set separately in response tests
         currency: "USD".to_string(),
         asset_currency: asset_currency.to_string(),
         icon_url: None,
@@ -74,7 +75,7 @@ mod investment_summary {
         let item = make_test_item("AAPL", dec!(10), dec!(150.00), dec!(180.00), Some("USD"));
 
         // When
-        let summary = calculate_investment_summary(item, Decimal::ONE, "USD");
+        let summary = calculate_investment_summary(item, Decimal::ONE, "USD", dec!(100));
 
         // Then: Native and converted values should be identical
         assert_eq!(summary.ticker, "AAPL");
@@ -97,7 +98,7 @@ mod investment_summary {
         let rate = dec!(1.35); // 1 USD = 1.35 SGD
 
         // When
-        let summary = calculate_investment_summary(item, rate, "SGD");
+        let summary = calculate_investment_summary(item, rate, "SGD", dec!(100));
 
         // Then: Native values unchanged, converted values multiplied by rate
         assert_eq!(summary.avg_buy_price, dec!(150.00));
@@ -117,7 +118,7 @@ mod investment_summary {
         let item = make_test_item("TSLA", dec!(5), dec!(100.00), dec!(80.00), Some("USD"));
 
         // When
-        let summary = calculate_investment_summary(item, Decimal::ONE, "USD");
+        let summary = calculate_investment_summary(item, Decimal::ONE, "USD", dec!(100));
 
         // Then
         assert_eq!(summary.change_pct, dec!(-20));
@@ -130,7 +131,7 @@ mod investment_summary {
         let item = make_test_item("FREE", dec!(100), dec!(0), dec!(10.00), Some("USD"));
 
         // When
-        let summary = calculate_investment_summary(item, Decimal::ONE, "USD");
+        let summary = calculate_investment_summary(item, Decimal::ONE, "USD", dec!(100));
 
         // Then: Should not panic, change_pct should be 0
         assert_eq!(summary.change_pct, Decimal::ZERO);
@@ -143,7 +144,7 @@ mod investment_summary {
         let item = make_test_item("BTC", dec!(1), dec!(40000.00), dec!(45000.00), None);
 
         // When
-        let summary = calculate_investment_summary(item, Decimal::ONE, "USD");
+        let summary = calculate_investment_summary(item, Decimal::ONE, "USD", dec!(100));
 
         // Then: Should default to USD
         assert_eq!(summary.asset_currency, "USD");

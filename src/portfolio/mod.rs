@@ -13,10 +13,71 @@ pub fn calculate_change_percent(current_price: Decimal, base_price: Decimal) -> 
     }
 }
 
-pub fn calculate_investment_summary(
+fn get_exchange_rate(
+    from_currency: &str,
+    to_currency: &str,
+    rates: &HashMap<String, Decimal>,
+) -> Decimal {
+    if from_currency == to_currency {
+        Decimal::ONE
+    } else {
+        *rates.get(from_currency).unwrap_or(&Decimal::ONE)
+    }
+}
+
+pub fn build_portfolio_response(
+    items: Vec<PortfolioJoinedRow>,
+    exchange_rates: &HashMap<String, Decimal>,
+    base_currency: &str,
+) -> PortfolioResponse {
+    // First pass: calculate totals and collect intermediate data
+    let mut intermediate_data: Vec<(PortfolioJoinedRow, Decimal, Decimal)> =
+        Vec::with_capacity(items.len());
+    let mut total_cost = Decimal::ZERO;
+    let mut absolute_change = Decimal::ZERO;
+    let mut total_value = Decimal::ZERO;
+
+    for item in items {
+        let asset_currency = item.currency.clone().unwrap_or_else(|| "USD".to_string());
+        let rate = get_exchange_rate(&asset_currency, base_currency, exchange_rates);
+
+        // Accumulate totals in base currency
+        let cost_converted = item.quantity * item.avg_buy_price * rate;
+        let value_converted = item.quantity * item.current_price * rate;
+
+        total_cost += cost_converted;
+        absolute_change += value_converted - cost_converted;
+        total_value += value_converted;
+
+        intermediate_data.push((item, rate, value_converted));
+    }
+
+    // Second pass: build summaries with portfolio percentage
+    let mut summary_list = Vec::with_capacity(intermediate_data.len());
+    for (item, rate, value_converted) in intermediate_data {
+        let portfolio_pct = if total_value > Decimal::ZERO {
+            (value_converted / total_value) * Decimal::from(100)
+        } else {
+            Decimal::ZERO
+        };
+
+        let summary = calculate_investment_summary(item, rate, base_currency, portfolio_pct);
+        summary_list.push(summary);
+    }
+
+    PortfolioResponse {
+        investments: summary_list,
+        total_cost,
+        absolute_change,
+        total_value,
+    }
+}
+
+fn calculate_investment_summary(
     item: PortfolioJoinedRow,
     exchange_rate: Decimal,
     base_currency: &str,
+    portfolio_pct: Decimal,
 ) -> InvestmentSummary {
     let asset_currency = item.currency.unwrap_or_else(|| "USD".to_string());
 
@@ -40,55 +101,10 @@ pub fn calculate_investment_summary(
         total_value: total_value_native,
         total_value_converted,
         change_pct,
+        portfolio_pct,
         currency: base_currency.to_string(),
         asset_currency,
         icon_url: item.icon_url,
-    }
-}
-
-fn get_exchange_rate(
-    from_currency: &str,
-    to_currency: &str,
-    rates: &HashMap<String, Decimal>,
-) -> Decimal {
-    if from_currency == to_currency {
-        Decimal::ONE
-    } else {
-        *rates.get(from_currency).unwrap_or(&Decimal::ONE)
-    }
-}
-
-pub fn build_portfolio_response(
-    items: Vec<PortfolioJoinedRow>,
-    exchange_rates: &HashMap<String, Decimal>,
-    base_currency: &str,
-) -> PortfolioResponse {
-    let mut summary_list = Vec::with_capacity(items.len());
-    let mut total_cost = Decimal::ZERO;
-    let mut absolute_change = Decimal::ZERO;
-    let mut total_value = Decimal::ZERO;
-
-    for item in items {
-        let asset_currency = item.currency.clone().unwrap_or_else(|| "USD".to_string());
-        let rate = get_exchange_rate(&asset_currency, base_currency, exchange_rates);
-
-        // Accumulate totals in base currency
-        let cost_converted = item.quantity * item.avg_buy_price * rate;
-        let value_converted = item.quantity * item.current_price * rate;
-
-        total_cost += cost_converted;
-        absolute_change += value_converted - cost_converted;
-        total_value += value_converted;
-
-        let summary = calculate_investment_summary(item, rate, base_currency);
-        summary_list.push(summary);
-    }
-
-    PortfolioResponse {
-        investments: summary_list,
-        total_cost,
-        absolute_change,
-        total_value,
     }
 }
 
