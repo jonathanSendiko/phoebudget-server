@@ -30,6 +30,7 @@ services:
       - JWT_SECRET=MY_SECRETTT
       - RUST_LOG=debug
       - REDIS_URL=redis://redis:6379
+      - ITICK_API_KEY=${ITICK_API_KEY}
 
   # Redis Service for Job Queue
   redis:

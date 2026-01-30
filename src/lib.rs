@@ -22,6 +22,7 @@ pub struct AppState {
     pub exchange_rate_cache: moka::future::Cache<String, rust_decimal::Decimal>,
     pub http_client: reqwest::Client,
     pub redis_client: redis::Client, // Added Redis Client
+    pub itick_api_key: Option<String>,
 }
 
 impl AppState {
@@ -52,6 +53,7 @@ impl AppState {
             self.price_cache.clone(),
             self.exchange_rate_cache.clone(),
             self.http_client.clone(),
+            self.itick_api_key.clone(),
         )
     }
 

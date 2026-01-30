@@ -66,12 +66,18 @@ async fn main() {
         .build()
         .expect("Failed to build HTTP client");
 
+    let itick_api_key = std::env::var("ITICK_API_KEY").ok();
+    if itick_api_key.is_none() {
+        tracing::warn!("ITICK_API_KEY not set - iTick stock price fetching will not work");
+    }
+
     let state = AppState {
         db: pool,
         price_cache: cache,
         exchange_rate_cache,
         http_client,
         redis_client,
+        itick_api_key,
     };
 
     // Configure rate limiter: 60 requests per minute per IP

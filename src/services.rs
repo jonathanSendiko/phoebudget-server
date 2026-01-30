@@ -522,6 +522,7 @@ pub struct FinanceService {
     price_cache: moka::future::Cache<String, Decimal>,
     exchange_rate_cache: moka::future::Cache<String, Decimal>,
     http_client: reqwest::Client,
+    itick_api_key: Option<String>,
 }
 
 impl FinanceService {
@@ -532,6 +533,7 @@ impl FinanceService {
         price_cache: moka::future::Cache<String, Decimal>,
         exchange_rate_cache: moka::future::Cache<String, Decimal>,
         http_client: reqwest::Client,
+        itick_api_key: Option<String>,
     ) -> Self {
         Self {
             portfolio_repo,
@@ -540,6 +542,7 @@ impl FinanceService {
             price_cache,
             exchange_rate_cache,
             http_client,
+            itick_api_key,
         }
     }
 
@@ -639,7 +642,7 @@ impl FinanceService {
         let asset_opt = self.portfolio_repo.get_asset(ticker).await?;
         let (api_ticker, source) = if let Some(asset) = asset_opt {
             let api_ticker = asset.api_ticker.unwrap_or(ticker.to_string());
-            let source = asset.source.unwrap_or("YAHOO".to_string());
+            let source = asset.source.unwrap_or("ITICK".to_string());
 
             // NEW: Check for missing icon and populate it lazily
             if asset.icon_url.is_none() && source == "COINGECKO" {
@@ -660,14 +663,19 @@ impl FinanceService {
 
             (api_ticker, source)
         } else {
-            // If asset not found in DB, for now we default to YAHOO/Ticker
+            // If asset not found in DB, for now we default to ITICK/Ticker
             // (e.g. legacy behavior or if someone manually inserted via sql)
-            (ticker.to_string(), "YAHOO".to_string())
+            (ticker.to_string(), "ITICK".to_string())
         };
 
-        let (price, currency) =
-            investments::fetch_price_with_source(&self.http_client, ticker, &api_ticker, &source)
-                .await?;
+        let (price, currency) = investments::fetch_price_with_source(
+            &self.http_client,
+            ticker,
+            &api_ticker,
+            &source,
+            self.itick_api_key.as_deref(),
+        )
+        .await?;
 
         // Update DB
         self.portfolio_repo

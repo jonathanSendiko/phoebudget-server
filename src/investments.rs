@@ -15,8 +15,22 @@ pub async fn fetch_price_with_source(
     _ticker: &str, // Original ticker (e.g. BTC) - unused for fetching but good for logging
     api_ticker: &str,
     source: &str,
+    itick_api_key: Option<&str>,
 ) -> Result<(Decimal, String), AppError> {
     match source {
+        "ITICK" => {
+            let api_key = itick_api_key.ok_or_else(|| {
+                AppError::ValidationError("ITICK_API_KEY not configured".to_string())
+            })?;
+            // Parse api_ticker format: "REGION:CODE" (e.g., "US:AAPL") or just "CODE" (defaults to US)
+            let (region, code) = if api_ticker.contains(':') {
+                let parts: Vec<&str> = api_ticker.splitn(2, ':').collect();
+                (parts[0], parts[1])
+            } else {
+                ("US", api_ticker)
+            };
+            fetch_price_itick(client, code, region, api_key).await
+        }
         "YAHOO" => fetch_price_yahoo(client, api_ticker).await,
         "BINANCE" => fetch_price_binance(client, api_ticker)
             .await
@@ -73,6 +87,93 @@ struct CoinGeckoResponse(std::collections::HashMap<String, CoinGeckoPrice>);
 #[derive(Deserialize, Debug)]
 struct CoinGeckoPrice {
     usd: f64,
+}
+
+// Internal structs for iTick API response parsing
+// Response format: {"code": 0, "msg": null, "data": {"s": "AAPL", "ld": 258.28, ...}}
+#[derive(Deserialize, Debug)]
+struct ITickResponse {
+    code: i32,
+    #[allow(dead_code)]
+    msg: Option<String>,
+    data: Option<ITickQuoteData>,
+}
+
+#[derive(Deserialize, Debug)]
+struct ITickQuoteData {
+    #[allow(dead_code)]
+    s: String, // Symbol
+    ld: f64, // Latest price (last done)
+    #[allow(dead_code)]
+    r: Option<String>, // Region
+}
+
+async fn fetch_price_itick(
+    client: &reqwest::Client,
+    code: &str,
+    region: &str,
+    api_key: &str,
+) -> Result<(Decimal, String), AppError> {
+    let url = format!(
+        "https://api-free.itick.org/stock/quote?region={}&code={}",
+        region, code
+    );
+
+    let resp = client
+        .get(&url)
+        .header("token", api_key)
+        .header("accept", "application/json")
+        .send()
+        .await
+        .map_err(|e| AppError::ValidationError(format!("iTick API connection failed: {}", e)))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(AppError::ValidationError(format!(
+            "iTick API returned error {}: {}",
+            status, text
+        )));
+    }
+
+    let itick_data: ITickResponse = resp
+        .json()
+        .await
+        .map_err(|e| AppError::ValidationError(format!("Failed to parse iTick response: {}", e)))?;
+
+    if itick_data.code != 0 {
+        return Err(AppError::ValidationError(format!(
+            "iTick API returned error code: {}",
+            itick_data.code
+        )));
+    }
+
+    let data = itick_data.data.ok_or_else(|| {
+        AppError::ValidationError(format!("No data found for {}:{}", region, code))
+    })?;
+
+    let price = Decimal::from_f64(data.ld)
+        .ok_or_else(|| AppError::ValidationError("Failed to parse iTick price".to_string()))?;
+
+    // Determine currency based on region
+    let currency = match region.to_uppercase().as_str() {
+        "US" => "USD",
+        "HK" => "HKD",
+        "SG" => "SGD",
+        "ID" => "IDR",
+        "CN" | "SH" | "SZ" => "CNY",
+        "JP" => "JPY",
+        "TW" => "TWD",
+        "IN" => "INR",
+        "TH" => "THB",
+        "DE" => "EUR",
+        "GB" => "GBP",
+        "AU" => "AUD",
+        "CA" => "CAD",
+        _ => "USD", // Default to USD for unknown regions
+    };
+
+    Ok((price, currency.to_string()))
 }
 
 async fn fetch_price_yahoo(
