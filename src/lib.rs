@@ -26,13 +26,15 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn auth_service(&self) -> services::AuthService {
+    pub fn auth_service(&self) -> services::AuthServiceImpl {
         services::AuthService::new(
             repository::UserRepository::new(self.db.clone()),
             repository::SettingsRepository::new(self.db.clone()),
             repository::PocketRepository::new(self.db.clone()),
             repository::RefreshTokenRepository::new(self.db.clone()),
             repository::SubscriptionRepository::new(self.db.clone()),
+            services::DefaultPasswordHasher,
+            services::DefaultTokenIssuer,
         )
     }
 
@@ -45,19 +47,20 @@ impl AppState {
         )
     }
 
-    pub fn finance_service(&self) -> services::FinanceService {
+    pub fn finance_service(&self) -> services::FinanceServiceImpl {
         services::FinanceService::new(
             repository::PortfolioRepository::new(self.db.clone()),
             repository::TransactionRepository::new(self.db.clone()),
             repository::SettingsRepository::new(self.db.clone()),
+            services::HttpPriceProvider::new(self.http_client.clone()),
+            services::HttpFinanceExchangeRateProvider::new(self.http_client.clone()),
             self.price_cache.clone(),
             self.exchange_rate_cache.clone(),
-            self.http_client.clone(),
             self.itick_api_key.clone(),
         )
     }
 
-    pub fn pocket_service(&self) -> services::PocketService {
+    pub fn pocket_service(&self) -> services::PocketServiceImpl {
         services::PocketService::new(
             repository::PocketRepository::new(self.db.clone()),
             repository::TransactionRepository::new(self.db.clone()),
@@ -68,7 +71,7 @@ impl AppState {
         services::SubscriptionService::new(repository::SubscriptionRepository::new(self.db.clone()))
     }
 
-    pub fn goal_service(&self) -> services::GoalService {
+    pub fn goal_service(&self) -> services::GoalServiceImpl {
         services::GoalService::new(
             repository::GoalRepository::new(self.db.clone()),
             repository::GoalEntryRepository::new(self.db.clone()),

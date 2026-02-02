@@ -6,16 +6,22 @@ pub mod subscription;
 pub mod transaction;
 pub mod user_subscription;
 
-pub use auth::AuthService;
+pub use auth::{
+    AuthPocketRepo, AuthRefreshTokenRepo, AuthService, AuthServiceImpl, AuthSettingsRepo,
+    AuthSubscriptionRepo, AuthUserRepo, DefaultPasswordHasher, DefaultTokenIssuer, PasswordHasher,
+    TokenIssuer,
+};
 pub use finance::FinanceService;
-pub use goal::GoalService;
-pub use pocket::PocketService;
+pub use goal::{GoalEntryRepo, GoalPocketRepo, GoalRepo, GoalService, GoalServiceImpl};
+pub use pocket::{PocketRepo, PocketService, PocketServiceImpl, PocketTransactionRepo};
 pub use subscription::SubscriptionService;
 pub use transaction::{
-    ExchangeRateProvider, HttpExchangeRateProvider, PocketRepo, SettingsRepo, TransactionRepo,
-    TransactionService, TransactionServiceImpl,
+    ExchangeRateProvider, HttpExchangeRateProvider, PocketRepo as TransactionPocketRepo,
+    SettingsRepo, TransactionRepo, TransactionService, TransactionServiceImpl,
 };
 pub use user_subscription::UserSubscriptionService;
-
-#[cfg(test)]
-mod tests;
+pub use finance::{
+    ExchangeRateProvider as FinanceExchangeRateProvider, FinanceServiceImpl, FinanceSettingsRepo,
+    FinancePortfolioRepo, FinanceTransactionRepo, HttpExchangeRateProvider as HttpFinanceExchangeRateProvider,
+    HttpPriceProvider, PriceProvider,
+};

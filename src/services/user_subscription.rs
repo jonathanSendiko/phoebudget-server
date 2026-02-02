@@ -178,7 +178,7 @@ impl UserSubscriptionService {
     }
 
     /// Core logic for calculating the next charge date
-    pub(crate) fn calculate_next_charge_date(
+    fn calculate_next_charge_date(
         basis: &str,
         billing_day: i32,
         billing_month: Option<i32>,
@@ -231,7 +231,7 @@ impl UserSubscriptionService {
     }
 
     /// Helper to handle "Feb 31" -> "Feb 28/29"
-    pub(crate) fn get_valid_date(year: i32, month: u32, day: u32) -> NaiveDate {
+    fn get_valid_date(year: i32, month: u32, day: u32) -> NaiveDate {
         // Try to create date. If fail, it's likely invalid day (e.g. 31 for Feb)
         // chrono::NaiveDate::from_ymd_opt(year, month, day).unwrap() // panic if invalid
 
@@ -329,5 +329,101 @@ impl UserSubscriptionService {
             .await?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::UserSubscriptionService;
+    use chrono::NaiveDate;
+
+    #[test]
+    fn monthly_billing_same_month_when_before_day() {
+        let reference = NaiveDate::from_ymd_opt(2026, 2, 2).unwrap();
+        let next = UserSubscriptionService::calculate_next_charge_date(
+            "monthly",
+            15,
+            None,
+            reference,
+            false,
+        );
+        assert_eq!(next, NaiveDate::from_ymd_opt(2026, 2, 15).unwrap());
+    }
+
+    #[test]
+    fn monthly_billing_next_month_when_after_day() {
+        let reference = NaiveDate::from_ymd_opt(2026, 2, 20).unwrap();
+        let next = UserSubscriptionService::calculate_next_charge_date(
+            "monthly",
+            15,
+            None,
+            reference,
+            false,
+        );
+        assert_eq!(next, NaiveDate::from_ymd_opt(2026, 3, 15).unwrap());
+    }
+
+    #[test]
+    fn monthly_retry_always_next_month() {
+        let reference = NaiveDate::from_ymd_opt(2026, 12, 15).unwrap();
+        let next = UserSubscriptionService::calculate_next_charge_date(
+            "monthly",
+            15,
+            None,
+            reference,
+            true,
+        );
+        assert_eq!(next, NaiveDate::from_ymd_opt(2027, 1, 15).unwrap());
+    }
+
+    #[test]
+    fn annual_billing_this_year_when_before_date() {
+        let reference = NaiveDate::from_ymd_opt(2026, 2, 2).unwrap();
+        let next = UserSubscriptionService::calculate_next_charge_date(
+            "annually",
+            15,
+            Some(3),
+            reference,
+            false,
+        );
+        assert_eq!(next, NaiveDate::from_ymd_opt(2026, 3, 15).unwrap());
+    }
+
+    #[test]
+    fn annual_billing_next_year_when_after_date() {
+        let reference = NaiveDate::from_ymd_opt(2026, 12, 20).unwrap();
+        let next = UserSubscriptionService::calculate_next_charge_date(
+            "annually",
+            15,
+            Some(3),
+            reference,
+            false,
+        );
+        assert_eq!(next, NaiveDate::from_ymd_opt(2027, 3, 15).unwrap());
+    }
+
+    #[test]
+    fn annual_retry_moves_to_next_year() {
+        let reference = NaiveDate::from_ymd_opt(2026, 3, 15).unwrap();
+        let next = UserSubscriptionService::calculate_next_charge_date(
+            "annually",
+            15,
+            Some(3),
+            reference,
+            true,
+        );
+        assert_eq!(next, NaiveDate::from_ymd_opt(2027, 3, 15).unwrap());
+    }
+
+    #[test]
+    fn get_valid_date_handles_non_leap_february() {
+        let date = UserSubscriptionService::get_valid_date(2025, 2, 31);
+        assert_eq!(date, NaiveDate::from_ymd_opt(2025, 2, 28).unwrap());
+    }
+
+    #[test]
+    fn get_valid_date_handles_leap_february() {
+        let date = UserSubscriptionService::get_valid_date(2024, 2, 31);
+        assert_eq!(date, NaiveDate::from_ymd_opt(2024, 2, 29).unwrap());
     }
 }

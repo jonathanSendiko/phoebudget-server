@@ -108,9 +108,8 @@ fn calculate_investment_summary(
     }
 }
 
-// Helper for tests only - not used in production but tests portfolio totals calculation
 #[cfg(test)]
-pub fn calculate_portfolio_totals(
+fn calculate_portfolio_totals(
     summaries: &[InvestmentSummary],
     exchange_rates: &HashMap<String, Decimal>,
     base_currency: &str,

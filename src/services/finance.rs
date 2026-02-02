@@ -1,38 +1,226 @@
+use async_trait::async_trait;
 use rust_decimal::Decimal;
 use uuid::Uuid;
 
 use crate::error::AppError;
 use crate::investments;
 use crate::repository::{PortfolioRepository, SettingsRepository, TransactionRepository};
-use crate::schemas::{CreatePortfolioItem, FinancialHealth, UpdateInvestment};
+use crate::schemas::{Asset, CreatePortfolioItem, FinancialHealth, UpdateInvestment};
 
-pub struct FinanceService {
-    portfolio_repo: PortfolioRepository,
-    transaction_repo: TransactionRepository,
-    settings_repo: SettingsRepository,
+#[async_trait]
+pub trait FinancePortfolioRepo: Send + Sync {
+    async fn get_tickers(&self, user_id: Uuid) -> Result<Vec<String>, AppError>;
+    async fn get_all_joined(&self, user_id: Uuid)
+        -> Result<Vec<crate::schemas::PortfolioJoinedRow>, AppError>;
+    async fn get_asset(&self, ticker: &str) -> Result<Option<Asset>, AppError>;
+    async fn update_asset_price(
+        &self,
+        ticker: &str,
+        price: Decimal,
+        currency: &str,
+    ) -> Result<(), AppError>;
+    async fn update_asset_icon(&self, ticker: &str, icon_url: &str) -> Result<(), AppError>;
+    async fn add_item(&self, user_id: Uuid, item: CreatePortfolioItem) -> Result<(), AppError>;
+    async fn delete(&self, user_id: Uuid, ticker: &str) -> Result<u64, AppError>;
+    async fn update(
+        &self,
+        user_id: Uuid,
+        ticker: &str,
+        quantity: Option<Decimal>,
+        avg_buy_price: Option<Decimal>,
+    ) -> Result<(), AppError>;
+}
+
+#[async_trait]
+pub trait FinanceTransactionRepo: Send + Sync {
+    async fn get_net_cash(&self, user_id: Uuid) -> Result<Decimal, AppError>;
+}
+
+#[async_trait]
+pub trait FinanceSettingsRepo: Send + Sync {
+    async fn get_base_currency(&self, user_id: Uuid) -> Result<String, AppError>;
+    async fn validate_currency(&self, code: &str) -> Result<bool, AppError>;
+    async fn set_base_currency(&self, user_id: Uuid, currency: &str) -> Result<(), AppError>;
+}
+
+#[async_trait]
+pub trait PriceProvider: Send + Sync {
+    async fn fetch_price(
+        &self,
+        ticker: &str,
+        api_ticker: &str,
+        source: &str,
+        itick_api_key: Option<&str>,
+    ) -> Result<(Decimal, String), AppError>;
+    async fn fetch_icon(&self, api_ticker: &str) -> Result<Option<String>, AppError>;
+}
+
+#[async_trait]
+pub trait ExchangeRateProvider: Send + Sync {
+    async fn fetch_rate(&self, from: &str, to: &str) -> Result<Decimal, AppError>;
+}
+
+pub struct HttpPriceProvider {
+    client: reqwest::Client,
+}
+
+impl HttpPriceProvider {
+    pub fn new(client: reqwest::Client) -> Self {
+        Self { client }
+    }
+}
+
+#[async_trait]
+impl PriceProvider for HttpPriceProvider {
+    async fn fetch_price(
+        &self,
+        ticker: &str,
+        api_ticker: &str,
+        source: &str,
+        itick_api_key: Option<&str>,
+    ) -> Result<(Decimal, String), AppError> {
+        investments::fetch_price_with_source(&self.client, ticker, api_ticker, source, itick_api_key)
+            .await
+    }
+
+    async fn fetch_icon(&self, api_ticker: &str) -> Result<Option<String>, AppError> {
+        investments::fetch_coingecko_icon(&self.client, api_ticker).await
+    }
+}
+
+pub struct HttpExchangeRateProvider {
+    client: reqwest::Client,
+}
+
+impl HttpExchangeRateProvider {
+    pub fn new(client: reqwest::Client) -> Self {
+        Self { client }
+    }
+}
+
+#[async_trait]
+impl ExchangeRateProvider for HttpExchangeRateProvider {
+    async fn fetch_rate(&self, from: &str, to: &str) -> Result<Decimal, AppError> {
+        investments::fetch_exchange_rate(&self.client, from, to).await
+    }
+}
+
+#[async_trait]
+impl FinancePortfolioRepo for PortfolioRepository {
+    async fn get_tickers(&self, user_id: Uuid) -> Result<Vec<String>, AppError> {
+        self.get_tickers(user_id).await
+    }
+
+    async fn get_all_joined(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Vec<crate::schemas::PortfolioJoinedRow>, AppError> {
+        self.get_all_joined(user_id).await
+    }
+
+    async fn get_asset(&self, ticker: &str) -> Result<Option<Asset>, AppError> {
+        self.get_asset(ticker).await
+    }
+
+    async fn update_asset_price(
+        &self,
+        ticker: &str,
+        price: Decimal,
+        currency: &str,
+    ) -> Result<(), AppError> {
+        self.update_asset_price(ticker, price, currency).await
+    }
+
+    async fn update_asset_icon(&self, ticker: &str, icon_url: &str) -> Result<(), AppError> {
+        self.update_asset_icon(ticker, icon_url).await
+    }
+
+    async fn add_item(&self, user_id: Uuid, item: CreatePortfolioItem) -> Result<(), AppError> {
+        self.add_item(user_id, item).await
+    }
+
+    async fn delete(&self, user_id: Uuid, ticker: &str) -> Result<u64, AppError> {
+        self.delete(user_id, ticker).await
+    }
+
+    async fn update(
+        &self,
+        user_id: Uuid,
+        ticker: &str,
+        quantity: Option<Decimal>,
+        avg_buy_price: Option<Decimal>,
+    ) -> Result<(), AppError> {
+        self.update(user_id, ticker, quantity, avg_buy_price).await
+    }
+}
+
+#[async_trait]
+impl FinanceTransactionRepo for TransactionRepository {
+    async fn get_net_cash(&self, user_id: Uuid) -> Result<Decimal, AppError> {
+        self.get_net_cash(user_id).await
+    }
+}
+
+#[async_trait]
+impl FinanceSettingsRepo for SettingsRepository {
+    async fn get_base_currency(&self, user_id: Uuid) -> Result<String, AppError> {
+        self.get_base_currency(user_id).await
+    }
+
+    async fn validate_currency(&self, code: &str) -> Result<bool, AppError> {
+        self.validate_currency(code).await
+    }
+
+    async fn set_base_currency(&self, user_id: Uuid, currency: &str) -> Result<(), AppError> {
+        self.set_base_currency(user_id, currency).await
+    }
+}
+
+pub type FinanceServiceImpl = FinanceService<
+    PortfolioRepository,
+    TransactionRepository,
+    SettingsRepository,
+    HttpPriceProvider,
+    HttpExchangeRateProvider,
+>;
+
+pub struct FinanceService<PRepo, TRepo, SRepo, PriceP, RateP> {
+    portfolio_repo: PRepo,
+    transaction_repo: TRepo,
+    settings_repo: SRepo,
+    price_provider: PriceP,
+    exchange_rate_provider: RateP,
     price_cache: moka::future::Cache<String, Decimal>,
     exchange_rate_cache: moka::future::Cache<String, Decimal>,
-    http_client: reqwest::Client,
     itick_api_key: Option<String>,
 }
 
-impl FinanceService {
+impl<PRepo, TRepo, SRepo, PriceP, RateP> FinanceService<PRepo, TRepo, SRepo, PriceP, RateP>
+where
+    PRepo: FinancePortfolioRepo,
+    TRepo: FinanceTransactionRepo,
+    SRepo: FinanceSettingsRepo,
+    PriceP: PriceProvider,
+    RateP: ExchangeRateProvider,
+{
     pub fn new(
-        portfolio_repo: PortfolioRepository,
-        transaction_repo: TransactionRepository,
-        settings_repo: SettingsRepository,
+        portfolio_repo: PRepo,
+        transaction_repo: TRepo,
+        settings_repo: SRepo,
+        price_provider: PriceP,
+        exchange_rate_provider: RateP,
         price_cache: moka::future::Cache<String, Decimal>,
         exchange_rate_cache: moka::future::Cache<String, Decimal>,
-        http_client: reqwest::Client,
         itick_api_key: Option<String>,
     ) -> Self {
         Self {
             portfolio_repo,
             transaction_repo,
             settings_repo,
+            price_provider,
+            exchange_rate_provider,
             price_cache,
             exchange_rate_cache,
-            http_client,
             itick_api_key,
         }
     }
@@ -50,7 +238,7 @@ impl FinanceService {
         }
 
         tracing::info!("Exchange rate cache MISS for {} -> {}", from, to);
-        let rate = investments::fetch_exchange_rate(&self.http_client, from, to).await?;
+        let rate = self.exchange_rate_provider.fetch_rate(from, to).await?;
         self.exchange_rate_cache.insert(cache_key, rate).await;
         Ok(rate)
     }
@@ -149,7 +337,7 @@ impl FinanceService {
             if asset.icon_url.is_none() && source == "COINGECKO" {
                 tracing::info!("Missing icon for {}, fetching from CoinGecko...", ticker);
                 // We don't want to fail the whole request if icon fetch fails
-                match investments::fetch_coingecko_icon(&self.http_client, &api_ticker).await {
+                match self.price_provider.fetch_icon(&api_ticker).await {
                     Ok(Some(url)) => {
                         if let Err(e) = self.portfolio_repo.update_asset_icon(ticker, &url).await {
                             tracing::error!("Failed to save icon for {}: {:?}", ticker, e);
@@ -169,14 +357,15 @@ impl FinanceService {
             (ticker.to_string(), "ITICK".to_string())
         };
 
-        let (price, currency) = investments::fetch_price_with_source(
-            &self.http_client,
-            ticker,
-            &api_ticker,
-            &source,
-            self.itick_api_key.as_deref(),
-        )
-        .await?;
+        let (price, currency) = self
+            .price_provider
+            .fetch_price(
+                ticker,
+                &api_ticker,
+                &source,
+                self.itick_api_key.as_deref(),
+            )
+            .await?;
 
         // Update DB
         self.portfolio_repo
@@ -267,5 +456,476 @@ impl FinanceService {
         self.portfolio_repo
             .update(user_id, &ticker, payload.quantity, payload.avg_buy_price)
             .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        ExchangeRateProvider, FinancePortfolioRepo, FinanceService, FinanceSettingsRepo,
+        FinanceTransactionRepo, PriceProvider,
+    };
+    use crate::error::AppError;
+    use crate::schemas::{Asset, CreatePortfolioItem, PortfolioJoinedRow};
+    use async_trait::async_trait;
+    use moka::future::Cache;
+    use rust_decimal::Decimal;
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
+    use uuid::Uuid;
+
+    #[derive(Clone, Default)]
+    struct MockPortfolioRepo {
+        state: Arc<Mutex<MockPortfolioState>>,
+    }
+
+    struct MockPortfolioState {
+        tickers: Vec<String>,
+        items: Vec<PortfolioJoinedRow>,
+        assets: HashMap<String, Asset>,
+        asset_calls: usize,
+        updated_prices: Vec<(String, Decimal, String)>,
+        updated_icons: Vec<(String, String)>,
+        delete_result: u64,
+        add_item_calls: usize,
+        update_calls: usize,
+    }
+
+    impl Default for MockPortfolioState {
+        fn default() -> Self {
+            Self {
+                tickers: Vec::new(),
+                items: Vec::new(),
+                assets: HashMap::new(),
+                asset_calls: 0,
+                updated_prices: Vec::new(),
+                updated_icons: Vec::new(),
+                delete_result: 1,
+                add_item_calls: 0,
+                update_calls: 0,
+            }
+        }
+    }
+
+    #[async_trait]
+    impl FinancePortfolioRepo for MockPortfolioRepo {
+        async fn get_tickers(&self, _user_id: Uuid) -> Result<Vec<String>, AppError> {
+            Ok(self.state.lock().unwrap().tickers.clone())
+        }
+
+        async fn get_all_joined(
+            &self,
+            _user_id: Uuid,
+        ) -> Result<Vec<PortfolioJoinedRow>, AppError> {
+            let state = self.state.lock().unwrap();
+            Ok(state.items.iter().map(clone_joined_row_ref).collect())
+        }
+
+        async fn get_asset(&self, ticker: &str) -> Result<Option<Asset>, AppError> {
+            let mut state = self.state.lock().unwrap();
+            state.asset_calls += 1;
+            Ok(state.assets.get(ticker).cloned())
+        }
+
+        async fn update_asset_price(
+            &self,
+            ticker: &str,
+            price: Decimal,
+            currency: &str,
+        ) -> Result<(), AppError> {
+            let mut state = self.state.lock().unwrap();
+            state
+                .updated_prices
+                .push((ticker.to_string(), price, currency.to_string()));
+            Ok(())
+        }
+
+        async fn update_asset_icon(&self, ticker: &str, icon_url: &str) -> Result<(), AppError> {
+            let mut state = self.state.lock().unwrap();
+            state
+                .updated_icons
+                .push((ticker.to_string(), icon_url.to_string()));
+            Ok(())
+        }
+
+        async fn add_item(
+            &self,
+            _user_id: Uuid,
+            _item: CreatePortfolioItem,
+        ) -> Result<(), AppError> {
+            let mut state = self.state.lock().unwrap();
+            state.add_item_calls += 1;
+            Ok(())
+        }
+
+        async fn delete(&self, _user_id: Uuid, _ticker: &str) -> Result<u64, AppError> {
+            Ok(self.state.lock().unwrap().delete_result)
+        }
+
+        async fn update(
+            &self,
+            _user_id: Uuid,
+            _ticker: &str,
+            _quantity: Option<Decimal>,
+            _avg_buy_price: Option<Decimal>,
+        ) -> Result<(), AppError> {
+            let mut state = self.state.lock().unwrap();
+            state.update_calls += 1;
+            Ok(())
+        }
+    }
+
+    #[derive(Clone)]
+    struct MockTransactionRepo {
+        net_cash: Decimal,
+    }
+
+    #[async_trait]
+    impl FinanceTransactionRepo for MockTransactionRepo {
+        async fn get_net_cash(&self, _user_id: Uuid) -> Result<Decimal, AppError> {
+            Ok(self.net_cash)
+        }
+    }
+
+    #[derive(Clone)]
+    struct MockSettingsRepo {
+        base_currency: String,
+        validate_ok: bool,
+        set_calls: Arc<Mutex<Vec<String>>>,
+    }
+
+    #[async_trait]
+    impl FinanceSettingsRepo for MockSettingsRepo {
+        async fn get_base_currency(&self, _user_id: Uuid) -> Result<String, AppError> {
+            Ok(self.base_currency.clone())
+        }
+
+        async fn validate_currency(&self, _code: &str) -> Result<bool, AppError> {
+            Ok(self.validate_ok)
+        }
+
+        async fn set_base_currency(&self, _user_id: Uuid, currency: &str) -> Result<(), AppError> {
+            self.set_calls.lock().unwrap().push(currency.to_string());
+            Ok(())
+        }
+    }
+
+    #[derive(Clone, Default)]
+    struct MockPriceProvider {
+        calls: Arc<Mutex<Vec<(String, String, String, Option<String>)>>>,
+        icon_calls: Arc<Mutex<Vec<String>>>,
+        price: Decimal,
+        currency: String,
+    }
+
+    #[async_trait]
+    impl PriceProvider for MockPriceProvider {
+        async fn fetch_price(
+            &self,
+            ticker: &str,
+            api_ticker: &str,
+            source: &str,
+            itick_api_key: Option<&str>,
+        ) -> Result<(Decimal, String), AppError> {
+            self.calls.lock().unwrap().push((
+                ticker.to_string(),
+                api_ticker.to_string(),
+                source.to_string(),
+                itick_api_key.map(|s| s.to_string()),
+            ));
+            Ok((self.price, self.currency.clone()))
+        }
+
+        async fn fetch_icon(&self, api_ticker: &str) -> Result<Option<String>, AppError> {
+            self.icon_calls
+                .lock()
+                .unwrap()
+                .push(api_ticker.to_string());
+            Ok(Some(format!("https://icons.example/{}.png", api_ticker)))
+        }
+    }
+
+    #[derive(Clone, Default)]
+    struct MockExchangeRateProvider {
+        calls: Arc<Mutex<Vec<(String, String)>>>,
+        rate: Decimal,
+    }
+
+    #[async_trait]
+    impl ExchangeRateProvider for MockExchangeRateProvider {
+        async fn fetch_rate(&self, from: &str, to: &str) -> Result<Decimal, AppError> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push((from.to_string(), to.to_string()));
+            Ok(self.rate)
+        }
+    }
+
+    fn make_finance_service(
+        portfolio_repo: MockPortfolioRepo,
+        transaction_repo: MockTransactionRepo,
+        settings_repo: MockSettingsRepo,
+        price_provider: MockPriceProvider,
+        exchange_rate_provider: MockExchangeRateProvider,
+        price_cache: Cache<String, Decimal>,
+        exchange_cache: Cache<String, Decimal>,
+    ) -> FinanceService<
+        MockPortfolioRepo,
+        MockTransactionRepo,
+        MockSettingsRepo,
+        MockPriceProvider,
+        MockExchangeRateProvider,
+    > {
+        FinanceService::new(
+            portfolio_repo,
+            transaction_repo,
+            settings_repo,
+            price_provider,
+            exchange_rate_provider,
+            price_cache,
+            exchange_cache,
+            None,
+        )
+    }
+
+    fn make_joined_row(
+        ticker: &str,
+        quantity: Decimal,
+        current_price: Decimal,
+        currency: Option<&str>,
+    ) -> PortfolioJoinedRow {
+        PortfolioJoinedRow {
+            ticker: ticker.to_string(),
+            name: format!("{} Inc", ticker),
+            quantity,
+            avg_buy_price: Decimal::ZERO,
+            current_price,
+            source: Some("ITICK".to_string()),
+            api_ticker: None,
+            currency: currency.map(|c| c.to_string()),
+            icon_url: None,
+        }
+    }
+
+    fn clone_joined_row_ref(row: &PortfolioJoinedRow) -> PortfolioJoinedRow {
+        PortfolioJoinedRow {
+            ticker: row.ticker.clone(),
+            name: row.name.clone(),
+            quantity: row.quantity,
+            avg_buy_price: row.avg_buy_price,
+            current_price: row.current_price,
+            source: row.source.clone(),
+            api_ticker: row.api_ticker.clone(),
+            currency: row.currency.clone(),
+            icon_url: row.icon_url.clone(),
+        }
+    }
+
+    #[tokio::test]
+    async fn get_financial_health_applies_exchange_rate() {
+        let mut state = MockPortfolioState::default();
+        state.items = vec![
+            make_joined_row("AAA", Decimal::ONE, Decimal::new(10, 0), Some("USD")),
+            make_joined_row("BBB", Decimal::new(2, 0), Decimal::new(5, 0), Some("EUR")),
+        ];
+        let portfolio_repo = MockPortfolioRepo {
+            state: Arc::new(Mutex::new(state)),
+        };
+        let transaction_repo = MockTransactionRepo {
+            net_cash: Decimal::new(100, 0),
+        };
+        let settings_repo = MockSettingsRepo {
+            base_currency: "USD".to_string(),
+            validate_ok: true,
+            set_calls: Arc::new(Mutex::new(Vec::new())),
+        };
+        let price_provider = MockPriceProvider::default();
+        let exchange_rate_provider = MockExchangeRateProvider {
+            rate: Decimal::new(2, 0),
+            ..Default::default()
+        };
+        let price_cache = Cache::new(100);
+        let exchange_cache = Cache::new(100);
+        let service = make_finance_service(
+            portfolio_repo,
+            transaction_repo,
+            settings_repo,
+            price_provider,
+            exchange_rate_provider.clone(),
+            price_cache,
+            exchange_cache,
+        );
+
+        let health = service.get_financial_health(Uuid::new_v4()).await.unwrap();
+        assert_eq!(health.cash_balance, Decimal::new(100, 0));
+        assert_eq!(health.investment_balance, Decimal::new(30, 0));
+        assert_eq!(health.total_net_worth, Decimal::new(130, 0));
+
+        let calls = exchange_rate_provider.calls.lock().unwrap();
+        assert_eq!(calls.as_slice(), &[("EUR".to_string(), "USD".to_string())]);
+    }
+
+    #[tokio::test]
+    async fn get_financial_health_uses_cached_exchange_rate() {
+        let mut state = MockPortfolioState::default();
+        state.items = vec![make_joined_row(
+            "BBB",
+            Decimal::new(2, 0),
+            Decimal::new(5, 0),
+            Some("EUR"),
+        )];
+        let portfolio_repo = MockPortfolioRepo {
+            state: Arc::new(Mutex::new(state)),
+        };
+        let transaction_repo = MockTransactionRepo {
+            net_cash: Decimal::ZERO,
+        };
+        let settings_repo = MockSettingsRepo {
+            base_currency: "USD".to_string(),
+            validate_ok: true,
+            set_calls: Arc::new(Mutex::new(Vec::new())),
+        };
+        let price_provider = MockPriceProvider::default();
+        let exchange_rate_provider = MockExchangeRateProvider {
+            rate: Decimal::new(9, 0),
+            ..Default::default()
+        };
+        let price_cache = Cache::new(100);
+        let exchange_cache = Cache::new(100);
+        exchange_cache
+            .insert("EUR_USD".to_string(), Decimal::new(3, 0))
+            .await;
+        let service = make_finance_service(
+            portfolio_repo,
+            transaction_repo,
+            settings_repo,
+            price_provider,
+            exchange_rate_provider.clone(),
+            price_cache,
+            exchange_cache,
+        );
+
+        let health = service.get_financial_health(Uuid::new_v4()).await.unwrap();
+        assert_eq!(health.investment_balance, Decimal::new(30, 0));
+
+        let calls = exchange_rate_provider.calls.lock().unwrap();
+        assert!(calls.is_empty());
+    }
+
+    #[tokio::test]
+    async fn update_base_currency_rejects_invalid_currency() {
+        let portfolio_repo = MockPortfolioRepo::default();
+        let transaction_repo = MockTransactionRepo {
+            net_cash: Decimal::ZERO,
+        };
+        let settings_repo = MockSettingsRepo {
+            base_currency: "USD".to_string(),
+            validate_ok: false,
+            set_calls: Arc::new(Mutex::new(Vec::new())),
+        };
+        let price_provider = MockPriceProvider::default();
+        let exchange_rate_provider = MockExchangeRateProvider::default();
+        let service = make_finance_service(
+            portfolio_repo,
+            transaction_repo,
+            settings_repo,
+            price_provider,
+            exchange_rate_provider,
+            Cache::new(100),
+            Cache::new(100),
+        );
+
+        let err = service
+            .update_base_currency(Uuid::new_v4(), "BAD".to_string())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AppError::ValidationError(msg) if msg == "Invalid currency code: BAD"));
+    }
+
+    #[tokio::test]
+    async fn remove_investment_returns_not_found() {
+        let mut state = MockPortfolioState::default();
+        state.delete_result = 0;
+        let portfolio_repo = MockPortfolioRepo {
+            state: Arc::new(Mutex::new(state)),
+        };
+        let transaction_repo = MockTransactionRepo {
+            net_cash: Decimal::ZERO,
+        };
+        let settings_repo = MockSettingsRepo {
+            base_currency: "USD".to_string(),
+            validate_ok: true,
+            set_calls: Arc::new(Mutex::new(Vec::new())),
+        };
+        let price_provider = MockPriceProvider::default();
+        let exchange_rate_provider = MockExchangeRateProvider::default();
+        let service = make_finance_service(
+            portfolio_repo,
+            transaction_repo,
+            settings_repo,
+            price_provider,
+            exchange_rate_provider,
+            Cache::new(100),
+            Cache::new(100),
+        );
+
+        let err = service
+            .remove_investment(Uuid::new_v4(), "XYZ".to_string())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AppError::NotFoundError(msg) if msg == "Investment XYZ not found"));
+    }
+
+    #[tokio::test]
+    async fn get_portfolio_list_skips_price_fetch_when_cached() {
+        let mut state = MockPortfolioState::default();
+        state.tickers = vec!["AAA".to_string()];
+        state.items = vec![make_joined_row(
+            "AAA",
+            Decimal::new(1, 0),
+            Decimal::new(10, 0),
+            Some("USD"),
+        )];
+        let portfolio_repo = MockPortfolioRepo {
+            state: Arc::new(Mutex::new(state)),
+        };
+        let transaction_repo = MockTransactionRepo {
+            net_cash: Decimal::ZERO,
+        };
+        let settings_repo = MockSettingsRepo {
+            base_currency: "USD".to_string(),
+            validate_ok: true,
+            set_calls: Arc::new(Mutex::new(Vec::new())),
+        };
+        let price_provider = MockPriceProvider {
+            price: Decimal::new(10, 0),
+            currency: "USD".to_string(),
+            ..Default::default()
+        };
+        let exchange_rate_provider = MockExchangeRateProvider::default();
+        let price_cache = Cache::new(100);
+        price_cache
+            .insert("AAA".to_string(), Decimal::new(10, 0))
+            .await;
+        let exchange_cache = Cache::new(100);
+        let service = make_finance_service(
+            portfolio_repo.clone(),
+            transaction_repo,
+            settings_repo,
+            price_provider.clone(),
+            exchange_rate_provider,
+            price_cache,
+            exchange_cache,
+        );
+
+        let _ = service.get_portfolio_list(Uuid::new_v4()).await.unwrap();
+
+        let calls = price_provider.calls.lock().unwrap();
+        assert!(calls.is_empty());
+
+        let state = portfolio_repo.state.lock().unwrap();
+        assert_eq!(state.asset_calls, 0);
+        assert!(state.updated_prices.is_empty());
     }
 }
