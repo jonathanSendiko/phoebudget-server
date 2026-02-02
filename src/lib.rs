@@ -36,12 +36,12 @@ impl AppState {
         )
     }
 
-    pub fn transaction_service(&self) -> services::TransactionService {
+    pub fn transaction_service(&self) -> services::TransactionServiceImpl {
         services::TransactionService::new(
             repository::TransactionRepository::new(self.db.clone()),
             repository::PocketRepository::new(self.db.clone()),
             repository::SettingsRepository::new(self.db.clone()),
-            self.http_client.clone(),
+            services::HttpExchangeRateProvider::new(self.http_client.clone()),
         )
     }
 

@@ -101,82 +101,105 @@ async fn main() {
     });
 
     let api_routes = Router::new()
-        .route("/auth/register", post(handlers::register))
-        .route("/auth/login", post(handlers::login))
-        .route("/auth/refresh", post(handlers::refresh_token))
+        .route("/auth/register", post(handlers::auth::register))
+        .route("/auth/login", post(handlers::auth::login))
+        .route("/auth/refresh", post(handlers::auth::refresh_token))
         .route(
             "/transactions",
-            post(handlers::create_transaction).get(handlers::get_transactions),
+            post(handlers::transaction::create_transaction)
+                .get(handlers::transaction::get_transactions),
         )
         .route(
             "/transactions/{id}",
-            put(handlers::update_transaction)
-                .delete(handlers::delete_transaction)
-                .get(handlers::get_transaction),
+            put(handlers::transaction::update_transaction)
+                .delete(handlers::transaction::delete_transaction)
+                .get(handlers::transaction::get_transaction),
         )
         .route(
             "/transactions/{id}/restore",
-            post(handlers::restore_transaction),
+            post(handlers::transaction::restore_transaction),
         )
-        .route("/settings/currency", put(handlers::update_base_currency))
+        .route(
+            "/settings/currency",
+            put(handlers::finance::update_base_currency),
+        )
         .route(
             "/settings/currencies",
-            get(handlers::get_available_currencies),
+            get(handlers::settings::get_available_currencies),
         )
-        .route("/categories", get(handlers::get_categories))
-        .route("/analysis/category", get(handlers::get_spending_analysis))
-        .route("/analysis/net-worth", get(handlers::get_financial_health))
-        .route("/portfolio/refresh", post(handlers::refresh_portfolio))
+        .route("/categories", get(handlers::transaction::get_categories))
+        .route(
+            "/analysis/category",
+            get(handlers::transaction::get_spending_analysis),
+        )
+        .route(
+            "/analysis/net-worth",
+            get(handlers::finance::get_financial_health),
+        )
+        .route(
+            "/portfolio/refresh",
+            post(handlers::finance::refresh_portfolio),
+        )
         .route(
             "/portfolio/{ticker}",
-            delete(handlers::remove_investment).put(handlers::update_investment),
+            delete(handlers::finance::remove_investment)
+                .put(handlers::finance::update_investment),
         )
-        .route("/auth/profile", get(handlers::get_profile))
-        .route("/auth/subscription", get(handlers::get_subscription))
+        .route("/auth/profile", get(handlers::auth::get_profile))
+        .route(
+            "/auth/subscription",
+            get(handlers::auth::get_subscription),
+        )
         .route(
             "/portfolio",
-            post(handlers::add_investment).get(handlers::get_portfolio),
+            post(handlers::finance::add_investment)
+                .get(handlers::finance::get_portfolio),
         )
-        .route("/assets", get(handlers::get_assets))
+        .route("/assets", get(handlers::assets::get_assets))
         .route(
             "/pockets",
-            post(handlers::create_pocket).get(handlers::get_pockets),
+            post(handlers::pocket::create_pocket).get(handlers::pocket::get_pockets),
         )
         .route(
             "/pockets/{id}",
-            get(handlers::get_pocket)
-                .put(handlers::update_pocket)
-                .delete(handlers::delete_pocket),
+            get(handlers::pocket::get_pocket)
+                .put(handlers::pocket::update_pocket)
+                .delete(handlers::pocket::delete_pocket),
         )
-        .route("/pockets/transfer", post(handlers::transfer_funds))
+        .route(
+            "/pockets/transfer",
+            post(handlers::transaction::transfer_funds),
+        )
         .route(
             "/goals",
-            post(handlers::create_goal).get(handlers::get_goals),
+            post(handlers::goal::create_goal).get(handlers::goal::get_goals),
         )
         .route(
             "/goals/{id}",
-            get(handlers::get_goal)
-                .put(handlers::update_goal)
-                .delete(handlers::delete_goal),
+            get(handlers::goal::get_goal)
+                .put(handlers::goal::update_goal)
+                .delete(handlers::goal::delete_goal),
         )
         .route(
             "/goals/{id}/entries",
-            post(handlers::create_goal_entry).get(handlers::get_goal_entries),
+            post(handlers::goal::create_goal_entry)
+                .get(handlers::goal::get_goal_entries),
         )
         .route(
             "/subscriptions",
-            post(handlers::create_user_subscription).get(handlers::get_user_subscriptions),
+            post(handlers::user_subscription::create_user_subscription)
+                .get(handlers::user_subscription::get_user_subscriptions),
         )
         .route(
             "/subscriptions/{id}",
-            get(handlers::get_user_subscription)
-                .put(handlers::update_user_subscription)
-                .delete(handlers::delete_user_subscription),
+            get(handlers::user_subscription::get_user_subscription)
+                .put(handlers::user_subscription::update_user_subscription)
+                .delete(handlers::user_subscription::delete_user_subscription),
         )
         .layer(GovernorLayer::new(governor_conf));
 
     let app = Router::new()
-        .route("/", get(handlers::health_check))
+        .route("/", get(handlers::health::health_check))
         .nest("/api/v1", api_routes)
         .layer(TraceLayer::new_for_http())
         .layer(middleware::from_fn(print_request_response))
