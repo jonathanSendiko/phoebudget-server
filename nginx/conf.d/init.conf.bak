@@ -1,7 +1,7 @@
 server {
     listen 80;
     listen [::]:80;
-    server_name YOUR_DOMAIN.COM;
+    server_name budget.phoebius.cloud;
 
     location /.well-known/acme-challenge/ {
         root /var/www/certbot;
