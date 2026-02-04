@@ -94,6 +94,7 @@ pub struct TransactionDetail {
     pub amount: Decimal,
     pub description: Option<String>,
     pub category: Option<Category>,
+    pub pocket: Option<PocketSummary>,
     pub occurred_at: DateTime<Utc>,
     pub created_at: Option<DateTime<Utc>>,
     pub original_currency: Option<String>,

@@ -10,6 +10,13 @@ pub struct TransactionRepository {
     pool: PgPool,
 }
 
+#[derive(sqlx::FromRow)]
+struct TransactionPocketRow {
+    pocket_id: Option<Uuid>,
+    pocket_name: Option<String>,
+    pocket_icon: Option<String>,
+}
+
 impl TransactionRepository {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
@@ -202,7 +209,7 @@ impl TransactionRepository {
         id: Uuid,
         user_id: Uuid,
     ) -> Result<TransactionDetail, AppError> {
-        let row = sqlx::query!(
+        let transaction_row = sqlx::query!(
             r#"
             SELECT 
                 t.id, t.amount, t.description, t.category_id, t.occurred_at, t.created_at,
@@ -221,24 +228,51 @@ impl TransactionRepository {
         .await?
         .ok_or(AppError::NotFoundError("Transaction not found".to_string()))?;
 
+        let pocket_row = sqlx::query_as::<_, TransactionPocketRow>(
+            r#"
+            SELECT
+                p.id as pocket_id,
+                p.name as pocket_name,
+                p.icon as pocket_icon
+            FROM transactions t
+            LEFT JOIN pockets p ON p.id = t.pocket_id
+            WHERE t.id = $1 AND t.user_id = $2 AND t.deleted_at IS NULL
+            "#,
+        )
+        .bind(id)
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let pocket = pocket_row.and_then(|p| {
+            p.pocket_id.map(|pocket_id| PocketSummary {
+                id: pocket_id,
+                name: p.pocket_name.unwrap_or_default(),
+                icon: p
+                    .pocket_icon
+                    .unwrap_or_else(|| "account_balance_wallet".to_string()),
+            })
+        });
+
         Ok(TransactionDetail {
-            id: row.id,
-            amount: row.amount,
-            description: row.description,
-            category: row.category_id.map(|id| Category {
+            id: transaction_row.id,
+            amount: transaction_row.amount,
+            description: transaction_row.description,
+            category: transaction_row.category_id.map(|id| Category {
                 id,
-                name: row.category_name.unwrap_or_default(),
-                is_income: row.category_is_income,
-                icon: row
+                name: transaction_row.category_name.unwrap_or_default(),
+                is_income: transaction_row.category_is_income,
+                icon: transaction_row
                     .category_icon
                     .unwrap_or_else(|| "help_outline".to_string()),
-                exclude_from_analysis: row.category_exclude,
+                exclude_from_analysis: transaction_row.category_exclude,
             }),
-            occurred_at: row.occurred_at,
-            created_at: row.created_at,
-            original_currency: row.original_currency,
-            original_amount: row.original_amount,
-            exchange_rate: row.exchange_rate,
+            pocket,
+            occurred_at: transaction_row.occurred_at,
+            created_at: transaction_row.created_at,
+            original_currency: transaction_row.original_currency,
+            original_amount: transaction_row.original_amount,
+            exchange_rate: transaction_row.exchange_rate,
         })
     }
 
