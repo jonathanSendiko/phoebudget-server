@@ -1,105 +1,163 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-# Exit on error
-set -e
+set -Eeuo pipefail
 
-if [ ! -f .env.prod ]; then
-    echo "❌ Error: .env.prod file not found!"
-    echo "Please create one based on .env.example (or the provided template) before running this script."
+ENV_FILE=".env.prod"
+COMPOSE_FILE="docker-compose.prod.yml"
+NGINX_CONF_DIR="./nginx/conf.d"
+INIT_CONF="${NGINX_CONF_DIR}/init.conf"
+DEFAULT_CONF="${NGINX_CONF_DIR}/default.conf"
+DEFAULT_DISABLED_CONF="${NGINX_CONF_DIR}/default.conf.disabled"
+CERTBOT_PATH="./certbot"
+rsa_key_size=4096
+
+read_env_var() {
+    local key="$1"
+    grep -E "^${key}=" "$ENV_FILE" | tail -n 1 | cut -d'=' -f2- | tr -d '"' | tr -d "'" | tr -d '\r' || true
+}
+
+if [ ! -f "$ENV_FILE" ]; then
+    echo "❌ Error: $ENV_FILE file not found."
     exit 1
 fi
 
-echo "🔍 Loading configuration..."
-# Manually load only safe variables needed for the script to avoid syntax errors in passwords
-DOMAIN_NAME=$(grep "^DOMAIN_NAME=" .env.prod | cut -d'=' -f2- | tr -d '"' | tr -d "'")
-LETSENCRYPT_EMAIL=$(grep "^LETSENCRYPT_EMAIL=" .env.prod | cut -d'=' -f2- | tr -d '"' | tr -d "'")
+echo "🔍 Loading deployment configuration..."
+DOMAIN_NAME="$(read_env_var "DOMAIN_NAME")"
+LETSENCRYPT_EMAIL="$(read_env_var "LETSENCRYPT_EMAIL")"
+LETSENCRYPT_STAGING="$(read_env_var "LETSENCRYPT_STAGING")"
 
-domains=($DOMAIN_NAME)
-rsa_key_size=4096
-data_path="./certbot"
-email="$LETSENCRYPT_EMAIL" # Can be empty if you don't want to provide email
-staging=0 # Set to 1 if you're testing your setup to avoid hitting request limits
-
-if [ -d "$data_path" ]; then
-    read -p "Existing data found for $domains. Continue and replace existing certificate? (y/N) " decision
-    if [ "$decision" != "Y" ] && [ "$decision" != "y" ]; then
-        exit
-    fi
+if [ -z "$DOMAIN_NAME" ]; then
+    echo "❌ Error: DOMAIN_NAME is missing in $ENV_FILE"
+    exit 1
 fi
 
-if [ ! -e "$data_path/conf/options-ssl-nginx.conf" ] || [ ! -e "$data_path/conf/ssl-dhparams.pem" ]; then
+domain_input="${DOMAIN_NAME//,/ }"
+read -r -a domains <<< "$domain_input"
+if [ "${#domains[@]}" -eq 0 ]; then
+    echo "❌ Error: DOMAIN_NAME must include at least one domain."
+    exit 1
+fi
+
+primary_domain="${domains[0]}"
+server_names="${domains[*]}"
+
+email_args=(--register-unsafely-without-email)
+if [ -n "$LETSENCRYPT_EMAIL" ]; then
+    email_args=(--email "$LETSENCRYPT_EMAIL")
+fi
+
+staging_args=()
+if [ "${LETSENCRYPT_STAGING:-0}" = "1" ]; then
+    staging_args=(--staging)
+fi
+
+domain_args=()
+for domain in "${domains[@]}"; do
+    domain_args+=("-d" "$domain")
+done
+
+echo "ℹ️  Migration mode reminder:"
+echo "   - Point DNS A/AAAA records to this new server before running certbot."
+echo "   - Using TTL=300 is good for cutover."
+echo "   - Requested domains: ${server_names}"
+echo
+
+mkdir -p "$NGINX_CONF_DIR" "$CERTBOT_PATH/conf" "$CERTBOT_PATH/www"
+
+# Recover from interrupted previous run if needed.
+if [ -f "$DEFAULT_DISABLED_CONF" ]; then
+    mv "$DEFAULT_DISABLED_CONF" "$DEFAULT_CONF"
+fi
+
+echo "### Rendering Nginx configuration for ${server_names} ..."
+cat > "$INIT_CONF" <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${server_names};
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://\$host\$request_uri;
+    }
+}
+EOF
+
+cat > "$DEFAULT_CONF" <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${server_names};
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://\$host\$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name ${server_names};
+
+    ssl_certificate /etc/letsencrypt/live/${primary_domain}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${primary_domain}/privkey.pem;
+
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    set \$upstream "api:3000";
+
+    location / {
+        proxy_pass http://\$upstream;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOF
+
+if [ ! -e "$CERTBOT_PATH/conf/options-ssl-nginx.conf" ] || [ ! -e "$CERTBOT_PATH/conf/ssl-dhparams.pem" ]; then
     echo "### Downloading recommended TLS parameters ..."
-    mkdir -p "$data_path/conf"
-    curl -s https://raw.githubusercontent.com/certbot/certbot/master/certbot-nginx/certbot_nginx/_internal/tls_configs/options-ssl-nginx.conf > "$data_path/conf/options-ssl-nginx.conf"
-    curl -s https://raw.githubusercontent.com/certbot/certbot/master/certbot/certbot/ssl-dhparams.pem > "$data_path/conf/ssl-dhparams.pem"
+    curl -s "https://raw.githubusercontent.com/certbot/certbot/master/certbot-nginx/certbot_nginx/_internal/tls_configs/options-ssl-nginx.conf" > "$CERTBOT_PATH/conf/options-ssl-nginx.conf"
+    curl -s "https://raw.githubusercontent.com/certbot/certbot/master/certbot/certbot/ssl-dhparams.pem" > "$CERTBOT_PATH/conf/ssl-dhparams.pem"
     echo
 fi
 
-echo "### Updating Nginx configuration with domain name..."
-# We use sed to replace YOUR_DOMAIN.COM with the actual domain in .env.prod
-# Restore config files if they were renamed in a previous run
-if [ -f ./nginx/conf.d/init.conf.bak ]; then
-    mv ./nginx/conf.d/init.conf.bak ./nginx/conf.d/init.conf
-fi
-
-if [ -f ./nginx/conf.d/default.conf.disabled ]; then
-    mv ./nginx/conf.d/default.conf.disabled ./nginx/conf.d/default.conf
-fi
-
-sed -i "s/YOUR_DOMAIN.COM/$DOMAIN_NAME/g" ./nginx/conf.d/init.conf
-sed -i "s/YOUR_DOMAIN.COM/$DOMAIN_NAME/g" ./nginx/conf.d/default.conf
-
-# Temporarily disable the production config (which requires SSL certs) so Nginx can start with just init.conf
-mv ./nginx/conf.d/default.conf ./nginx/conf.d/default.conf.disabled
-
-echo "### Starting Nginx (HTTP only)..."
-docker compose --env-file .env.prod -f docker-compose.prod.yml up --force-recreate -d nginx
+echo "### Starting Nginx with ACME-only config ..."
+mv "$DEFAULT_CONF" "$DEFAULT_DISABLED_CONF"
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up --force-recreate -d --no-deps nginx
 echo
 
-echo "### Requesting Let's Encrypt certificate for $domains ..."
-# Join $domains to -d args
-domain_args=""
-for domain in "${domains[@]}"; do
-    domain_args="$domain_args -d $domain"
-done
-
-# Select appropriate email arg
-case "$email" in
-  "") email_arg="--register-unsafely-without-email" ;;
-  *) email_arg="--email $email" ;;
-esac
-
-# Enable staging mode if needed
-if [ $staging != "0" ]; then staging_arg="--staging"; fi
-
-docker compose --env-file .env.prod -f docker-compose.prod.yml run --rm --entrypoint "\
-  certbot certonly --webroot -w /var/www/certbot \
-    $staging_arg \
-    $email_arg \
-    $domain_args \
-    --rsa-key-size $rsa_key_size \
+echo "### Requesting/refreshing certificate for: ${server_names} ..."
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" run --rm --entrypoint certbot certbot \
+    certonly --webroot -w /var/www/certbot \
+    "${staging_args[@]}" \
+    "${email_args[@]}" \
+    "${domain_args[@]}" \
+    --rsa-key-size "$rsa_key_size" \
     --agree-tos \
-    --force-renewal" certbot
+    --non-interactive \
+    --keep-until-expiring \
+    --expand \
+    --cert-name "$primary_domain"
 echo
 
-echo "### Reloading Nginx ..."
-docker compose --env-file .env.prod -f docker-compose.prod.yml exec nginx nginx -s reload
+echo "### Enabling full HTTPS config ..."
+rm -f "$INIT_CONF"
+mv "$DEFAULT_DISABLED_CONF" "$DEFAULT_CONF"
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" restart nginx
+echo
 
-echo "### Preparing Production Configuration ..."
-# Swap the init config (which only handles ACME) with the real config (which does SSL termination)
-# We can just keep default.conf as the main one, but we need to ensure the user started with init.conf logic active
-# For simplicity in this script:
-# 1. We started with init.conf effectively if we just mapped it? 
-# Actually, the docker-compose maps the whole conf.d. 
-# We need to ensure only init.conf is active first, then switch.
-# A simpler way: Rename default.conf.disabled to default.conf after cert is obtained.
+echo "### Starting entire production stack ..."
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d
 
-mv ./nginx/conf.d/init.conf ./nginx/conf.d/init.conf.bak
-mv ./nginx/conf.d/default.conf.disabled ./nginx/conf.d/default.conf
-# Ensure default.conf is active
-docker compose --env-file .env.prod -f docker-compose.prod.yml restart nginx
-
-echo "### Starting entire stack ..."
-docker compose --env-file .env.prod -f docker-compose.prod.yml up -d
-
-echo "✅ Setup complete! Your app should be live at https://$DOMAIN_NAME"
+echo "✅ Setup complete! App URL: https://${primary_domain}"
