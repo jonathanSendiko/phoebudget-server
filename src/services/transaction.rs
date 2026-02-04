@@ -30,6 +30,7 @@ pub trait TransactionRepo: Send + Sync {
         start_date: Option<DateTime<Utc>>,
         end_date: Option<DateTime<Utc>>,
         pocket_id: Option<Uuid>,
+        category_id: Option<i32>,
         search: Option<String>,
         limit: i64,
         offset: i64,
@@ -40,6 +41,7 @@ pub trait TransactionRepo: Send + Sync {
         start_date: Option<DateTime<Utc>>,
         end_date: Option<DateTime<Utc>>,
         pocket_id: Option<Uuid>,
+        category_id: Option<i32>,
         search: Option<String>,
     ) -> Result<i64, AppError>;
     async fn get_spending_analysis(
@@ -146,12 +148,20 @@ impl TransactionRepo for TransactionRepository {
         start_date: Option<DateTime<Utc>>,
         end_date: Option<DateTime<Utc>>,
         pocket_id: Option<Uuid>,
+        category_id: Option<i32>,
         search: Option<String>,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<crate::schemas::Transaction>, AppError> {
         self.find_by_user_and_date(
-            user_id, start_date, end_date, pocket_id, search, limit, offset,
+            user_id,
+            start_date,
+            end_date,
+            pocket_id,
+            category_id,
+            search,
+            limit,
+            offset,
         )
         .await
     }
@@ -162,10 +172,18 @@ impl TransactionRepo for TransactionRepository {
         start_date: Option<DateTime<Utc>>,
         end_date: Option<DateTime<Utc>>,
         pocket_id: Option<Uuid>,
+        category_id: Option<i32>,
         search: Option<String>,
     ) -> Result<i64, AppError> {
-        self.count_by_user_and_date(user_id, start_date, end_date, pocket_id, search)
-            .await
+        self.count_by_user_and_date(
+            user_id,
+            start_date,
+            end_date,
+            pocket_id,
+            category_id,
+            search,
+        )
+        .await
     }
 
     async fn get_spending_analysis(
@@ -360,6 +378,7 @@ where
         start_date: Option<DateTime<Utc>>,
         end_date: Option<DateTime<Utc>>,
         pocket_id: Option<Uuid>,
+        category_id: Option<i32>,
         search: Option<String>,
         page: i64,
         limit: i64,
@@ -384,6 +403,7 @@ where
                 start_date,
                 end_date,
                 pocket_id,
+                category_id,
                 search.clone(),
                 limit,
                 offset,
@@ -392,7 +412,14 @@ where
 
         let total = self
             .transaction_repo
-            .count_by_user_and_date(user_id, start_date, end_date, pocket_id, search)
+            .count_by_user_and_date(
+                user_id,
+                start_date,
+                end_date,
+                pocket_id,
+                category_id,
+                search,
+            )
             .await?;
 
         let total_pages = (total as f64 / limit as f64).ceil() as i64;
@@ -740,6 +767,7 @@ mod tests {
         start_date: Option<DateTime<Utc>>,
         end_date: Option<DateTime<Utc>>,
         pocket_id: Option<Uuid>,
+        category_id: Option<i32>,
         search: Option<String>,
         limit: i64,
         offset: i64,
@@ -752,6 +780,7 @@ mod tests {
         start_date: Option<DateTime<Utc>>,
         end_date: Option<DateTime<Utc>>,
         pocket_id: Option<Uuid>,
+        category_id: Option<i32>,
         search: Option<String>,
     }
 
@@ -823,6 +852,7 @@ mod tests {
             start_date: Option<DateTime<Utc>>,
             end_date: Option<DateTime<Utc>>,
             pocket_id: Option<Uuid>,
+            category_id: Option<i32>,
             search: Option<String>,
             limit: i64,
             offset: i64,
@@ -833,6 +863,7 @@ mod tests {
                 start_date,
                 end_date,
                 pocket_id,
+                category_id,
                 search,
                 limit,
                 offset,
@@ -846,6 +877,7 @@ mod tests {
             start_date: Option<DateTime<Utc>>,
             end_date: Option<DateTime<Utc>>,
             pocket_id: Option<Uuid>,
+            category_id: Option<i32>,
             search: Option<String>,
         ) -> Result<i64, AppError> {
             let mut state = self.state.lock().unwrap();
@@ -854,6 +886,7 @@ mod tests {
                 start_date,
                 end_date,
                 pocket_id,
+                category_id,
                 search,
             });
             Ok(state.total_count)
@@ -1223,7 +1256,16 @@ mod tests {
         let end = DateTime::<Utc>::from_timestamp(1_700_000_000, 0).unwrap();
 
         let err = service
-            .get_transactions(Uuid::new_v4(), Some(start), Some(end), None, None, 1, 20)
+            .get_transactions(
+                Uuid::new_v4(),
+                Some(start),
+                Some(end),
+                None,
+                None,
+                None,
+                1,
+                20,
+            )
             .await
             .unwrap_err();
         assert!(
@@ -1251,7 +1293,7 @@ mod tests {
         let service = make_transaction_service(tx_repo.clone(), pocket_repo, settings_repo, fx);
 
         let response = service
-            .get_transactions(Uuid::new_v4(), None, None, None, None, 0, 1000)
+            .get_transactions(Uuid::new_v4(), None, None, None, Some(12), None, 0, 1000)
             .await
             .unwrap();
         assert_eq!(response.limit, 100);
@@ -1262,6 +1304,9 @@ mod tests {
         let find_args = state.find_args.as_ref().expect("find args");
         assert_eq!(find_args.limit, 100);
         assert_eq!(find_args.offset, 0);
+        assert_eq!(find_args.category_id, Some(12));
+        let count_args = state.count_args.as_ref().expect("count args");
+        assert_eq!(count_args.category_id, Some(12));
     }
 
     #[tokio::test]

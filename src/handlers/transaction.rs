@@ -86,6 +86,7 @@ pub async fn get_transactions(
             params.start_date,
             params.end_date,
             params.pocket_id,
+            params.category_id,
             params.search,
             params.page,
             params.limit,
