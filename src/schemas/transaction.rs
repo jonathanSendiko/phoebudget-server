@@ -118,7 +118,7 @@ pub struct Category {
     pub exclude_from_analysis: bool,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, Clone)]
 pub struct CategorySummary {
     pub category: String,
     #[serde(serialize_with = "round_currency")]
@@ -135,5 +135,7 @@ pub struct SpendingAnalysisResponse {
     pub total_spent: Decimal,
     #[serde(serialize_with = "round_currency")]
     pub net_income: Decimal,
+    #[serde(serialize_with = "round_currency_option", default)]
+    pub comparison_percentage: Option<Decimal>,
     pub categories: Vec<CategorySummary>,
 }

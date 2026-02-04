@@ -185,11 +185,10 @@ async fn fetch_price_yahoo(
         ticker
     );
 
-    let resp = client
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e| AppError::ValidationError(format!("Yahoo API connection failed: {}", e)))?;
+    let resp =
+        client.get(&url).send().await.map_err(|e| {
+            AppError::ValidationError(format!("Yahoo API connection failed: {}", e))
+        })?;
 
     if !resp.status().is_success() {
         let status = resp.status();
@@ -232,11 +231,10 @@ async fn fetch_price_binance(client: &reqwest::Client, ticker: &str) -> Result<D
         ticker.to_uppercase()
     );
 
-    let resp = client
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e| AppError::ValidationError(format!("Binance API connection failed: {}", e)))?;
+    let resp =
+        client.get(&url).send().await.map_err(|e| {
+            AppError::ValidationError(format!("Binance API connection failed: {}", e))
+        })?;
 
     if !resp.status().is_success() {
         return Err(AppError::ValidationError(format!(

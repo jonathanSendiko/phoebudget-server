@@ -341,11 +341,7 @@ mod tests {
     fn monthly_billing_same_month_when_before_day() {
         let reference = NaiveDate::from_ymd_opt(2026, 2, 2).unwrap();
         let next = UserSubscriptionService::calculate_next_charge_date(
-            "monthly",
-            15,
-            None,
-            reference,
-            false,
+            "monthly", 15, None, reference, false,
         );
         assert_eq!(next, NaiveDate::from_ymd_opt(2026, 2, 15).unwrap());
     }
@@ -354,11 +350,7 @@ mod tests {
     fn monthly_billing_next_month_when_after_day() {
         let reference = NaiveDate::from_ymd_opt(2026, 2, 20).unwrap();
         let next = UserSubscriptionService::calculate_next_charge_date(
-            "monthly",
-            15,
-            None,
-            reference,
-            false,
+            "monthly", 15, None, reference, false,
         );
         assert_eq!(next, NaiveDate::from_ymd_opt(2026, 3, 15).unwrap());
     }
@@ -367,11 +359,7 @@ mod tests {
     fn monthly_retry_always_next_month() {
         let reference = NaiveDate::from_ymd_opt(2026, 12, 15).unwrap();
         let next = UserSubscriptionService::calculate_next_charge_date(
-            "monthly",
-            15,
-            None,
-            reference,
-            true,
+            "monthly", 15, None, reference, true,
         );
         assert_eq!(next, NaiveDate::from_ymd_opt(2027, 1, 15).unwrap());
     }

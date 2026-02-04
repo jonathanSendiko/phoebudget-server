@@ -142,18 +142,13 @@ async fn main() {
         )
         .route(
             "/portfolio/{ticker}",
-            delete(handlers::finance::remove_investment)
-                .put(handlers::finance::update_investment),
+            delete(handlers::finance::remove_investment).put(handlers::finance::update_investment),
         )
         .route("/auth/profile", get(handlers::auth::get_profile))
-        .route(
-            "/auth/subscription",
-            get(handlers::auth::get_subscription),
-        )
+        .route("/auth/subscription", get(handlers::auth::get_subscription))
         .route(
             "/portfolio",
-            post(handlers::finance::add_investment)
-                .get(handlers::finance::get_portfolio),
+            post(handlers::finance::add_investment).get(handlers::finance::get_portfolio),
         )
         .route("/assets", get(handlers::assets::get_assets))
         .route(
@@ -182,8 +177,7 @@ async fn main() {
         )
         .route(
             "/goals/{id}/entries",
-            post(handlers::goal::create_goal_entry)
-                .get(handlers::goal::get_goal_entries),
+            post(handlers::goal::create_goal_entry).get(handlers::goal::get_goal_entries),
         )
         .route(
             "/subscriptions",

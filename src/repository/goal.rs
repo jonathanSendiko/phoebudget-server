@@ -4,7 +4,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::error::AppError;
-use crate::schemas::{PocketSummary};
+use crate::schemas::PocketSummary;
 
 pub struct GoalRepository {
     pool: PgPool,

@@ -45,17 +45,12 @@ pub trait GoalEntryRepo: Send + Sync {
         description: Option<String>,
         date: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<Uuid, AppError>;
-    async fn get_by_goal(&self, goal_id: Uuid)
-        -> Result<Vec<crate::schemas::GoalEntry>, AppError>;
+    async fn get_by_goal(&self, goal_id: Uuid) -> Result<Vec<crate::schemas::GoalEntry>, AppError>;
 }
 
 #[async_trait]
 pub trait GoalPocketRepo: Send + Sync {
-    async fn get_by_id(
-        &self,
-        id: Uuid,
-        user_id: Uuid,
-    ) -> Result<crate::schemas::Pocket, AppError>;
+    async fn get_by_id(&self, id: Uuid, user_id: Uuid) -> Result<crate::schemas::Pocket, AppError>;
 }
 
 #[async_trait]
@@ -133,21 +128,14 @@ impl GoalEntryRepo for GoalEntryRepository {
         self.create(goal_id, amount, description, date).await
     }
 
-    async fn get_by_goal(
-        &self,
-        goal_id: Uuid,
-    ) -> Result<Vec<crate::schemas::GoalEntry>, AppError> {
+    async fn get_by_goal(&self, goal_id: Uuid) -> Result<Vec<crate::schemas::GoalEntry>, AppError> {
         self.get_by_goal(goal_id).await
     }
 }
 
 #[async_trait]
 impl GoalPocketRepo for PocketRepository {
-    async fn get_by_id(
-        &self,
-        id: Uuid,
-        user_id: Uuid,
-    ) -> Result<crate::schemas::Pocket, AppError> {
+    async fn get_by_id(&self, id: Uuid, user_id: Uuid) -> Result<crate::schemas::Pocket, AppError> {
         self.get_by_id(id, user_id).await
     }
 }
@@ -313,8 +301,24 @@ mod tests {
 
     struct MockGoalState {
         goals: HashMap<Uuid, GoalDetail>,
-        create_calls: Vec<(Uuid, Uuid, String, Option<String>, Decimal, Option<Decimal>, Option<String>)>,
-        update_calls: Vec<(Uuid, Uuid, Option<String>, Option<String>, Option<Decimal>, Option<Decimal>, Option<String>)>,
+        create_calls: Vec<(
+            Uuid,
+            Uuid,
+            String,
+            Option<String>,
+            Decimal,
+            Option<Decimal>,
+            Option<String>,
+        )>,
+        update_calls: Vec<(
+            Uuid,
+            Uuid,
+            Option<String>,
+            Option<String>,
+            Option<Decimal>,
+            Option<Decimal>,
+            Option<String>,
+        )>,
         delete_result: u64,
     }
 
@@ -378,9 +382,15 @@ mod tests {
             icon: Option<String>,
         ) -> Result<(), AppError> {
             let mut state = self.state.lock().unwrap();
-            state
-                .update_calls
-                .push((id, user_id, name, description, target_amount, current_amount, icon));
+            state.update_calls.push((
+                id,
+                user_id,
+                name,
+                description,
+                target_amount,
+                current_amount,
+                icon,
+            ));
             Ok(())
         }
 
@@ -424,11 +434,7 @@ mod tests {
 
     #[async_trait]
     impl GoalPocketRepo for MockPocketRepo {
-        async fn get_by_id(
-            &self,
-            id: Uuid,
-            user_id: Uuid,
-        ) -> Result<Pocket, AppError> {
+        async fn get_by_id(&self, id: Uuid, user_id: Uuid) -> Result<Pocket, AppError> {
             self.calls.lock().unwrap().push((id, user_id));
             Ok(Pocket {
                 id,
@@ -513,7 +519,9 @@ mod tests {
         };
 
         let err = service.create_goal(Uuid::new_v4(), req).await.unwrap_err();
-        assert!(matches!(err, AppError::ValidationError(msg) if msg == "Target amount must be positive"));
+        assert!(
+            matches!(err, AppError::ValidationError(msg) if msg == "Target amount must be positive")
+        );
     }
 
     #[tokio::test]
@@ -534,7 +542,9 @@ mod tests {
         };
 
         let err = service.create_goal(Uuid::new_v4(), req).await.unwrap_err();
-        assert!(matches!(err, AppError::ValidationError(msg) if msg == "Goal name cannot be empty"));
+        assert!(
+            matches!(err, AppError::ValidationError(msg) if msg == "Goal name cannot be empty")
+        );
     }
 
     #[tokio::test]
@@ -590,7 +600,9 @@ mod tests {
             .update_goal(Uuid::new_v4(), Uuid::new_v4(), req)
             .await
             .unwrap_err();
-        assert!(matches!(err, AppError::ValidationError(msg) if msg == "Target amount must be positive"));
+        assert!(
+            matches!(err, AppError::ValidationError(msg) if msg == "Target amount must be positive")
+        );
     }
 
     #[tokio::test]
@@ -601,7 +613,11 @@ mod tests {
                 ..Default::default()
             })),
         };
-        let service = make_service(goal_repo, MockGoalEntryRepo::default(), MockPocketRepo::default());
+        let service = make_service(
+            goal_repo,
+            MockGoalEntryRepo::default(),
+            MockPocketRepo::default(),
+        );
 
         let err = service
             .delete_goal(Uuid::new_v4(), Uuid::new_v4())
@@ -658,15 +674,13 @@ mod tests {
         };
         let entry_repo = MockGoalEntryRepo {
             calls: Arc::new(Mutex::new(Vec::new())),
-            entries: Arc::new(Mutex::new(vec![
-                GoalEntry {
-                    id: Uuid::new_v4(),
-                    goal_id,
-                    amount: Decimal::new(5, 0),
-                    description: None,
-                    date: Utc::now(),
-                },
-            ])),
+            entries: Arc::new(Mutex::new(vec![GoalEntry {
+                id: Uuid::new_v4(),
+                goal_id,
+                amount: Decimal::new(5, 0),
+                description: None,
+                date: Utc::now(),
+            }])),
         };
         let service = make_service(goal_repo, entry_repo.clone(), MockPocketRepo::default());
 

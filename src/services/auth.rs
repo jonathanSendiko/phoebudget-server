@@ -439,7 +439,10 @@ mod tests {
             Ok(Uuid::new_v4())
         }
 
-        async fn get_profile(&self, _user_id: Uuid) -> Result<crate::schemas::UserProfile, AppError> {
+        async fn get_profile(
+            &self,
+            _user_id: Uuid,
+        ) -> Result<crate::schemas::UserProfile, AppError> {
             let mut state = self.state.lock().unwrap();
             state.profile_calls += 1;
             Err(AppError::InternalServerError("not used".to_string()))
@@ -670,7 +673,9 @@ mod tests {
         };
 
         let err = service.register(req).await.unwrap_err();
-        assert!(matches!(err, AppError::ValidationError(msg) if msg == "User with this email or username already exists"));
+        assert!(
+            matches!(err, AppError::ValidationError(msg) if msg == "User with this email or username already exists")
+        );
     }
 
     #[tokio::test]
@@ -703,7 +708,9 @@ mod tests {
         };
 
         let err = service.register(req).await.unwrap_err();
-        assert!(matches!(err, AppError::ValidationError(msg) if msg == "Invalid currency code: BAD"));
+        assert!(
+            matches!(err, AppError::ValidationError(msg) if msg == "Invalid currency code: BAD")
+        );
     }
 
     #[tokio::test]
@@ -969,7 +976,9 @@ mod tests {
         );
 
         let err = service.refresh_access(token).await.unwrap_err();
-        assert!(matches!(err, AppError::AuthError(msg) if msg == "Security alert: Token reuse detected"));
+        assert!(
+            matches!(err, AppError::AuthError(msg) if msg == "Security alert: Token reuse detected")
+        );
         assert_eq!(refresh_repo.state.lock().unwrap().revoked, vec![user_id]);
     }
 

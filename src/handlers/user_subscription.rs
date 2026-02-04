@@ -9,8 +9,7 @@ use crate::auth::UserId;
 use crate::error::AppError;
 use crate::response::ApiResponse;
 use crate::schemas::{
-    CreateUserSubscription, UpdateUserSubscription, UserSubscriptionDetail,
-    UserSubscriptionSummary,
+    CreateUserSubscription, UpdateUserSubscription, UserSubscriptionDetail, UserSubscriptionSummary,
 };
 
 pub async fn create_user_subscription(

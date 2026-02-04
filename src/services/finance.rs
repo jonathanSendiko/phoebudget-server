@@ -10,8 +10,10 @@ use crate::schemas::{Asset, CreatePortfolioItem, FinancialHealth, UpdateInvestme
 #[async_trait]
 pub trait FinancePortfolioRepo: Send + Sync {
     async fn get_tickers(&self, user_id: Uuid) -> Result<Vec<String>, AppError>;
-    async fn get_all_joined(&self, user_id: Uuid)
-        -> Result<Vec<crate::schemas::PortfolioJoinedRow>, AppError>;
+    async fn get_all_joined(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Vec<crate::schemas::PortfolioJoinedRow>, AppError>;
     async fn get_asset(&self, ticker: &str) -> Result<Option<Asset>, AppError>;
     async fn update_asset_price(
         &self,
@@ -79,8 +81,14 @@ impl PriceProvider for HttpPriceProvider {
         source: &str,
         itick_api_key: Option<&str>,
     ) -> Result<(Decimal, String), AppError> {
-        investments::fetch_price_with_source(&self.client, ticker, api_ticker, source, itick_api_key)
-            .await
+        investments::fetch_price_with_source(
+            &self.client,
+            ticker,
+            api_ticker,
+            source,
+            itick_api_key,
+        )
+        .await
     }
 
     async fn fetch_icon(&self, api_ticker: &str) -> Result<Option<String>, AppError> {
@@ -359,12 +367,7 @@ where
 
         let (price, currency) = self
             .price_provider
-            .fetch_price(
-                ticker,
-                &api_ticker,
-                &source,
-                self.itick_api_key.as_deref(),
-            )
+            .fetch_price(ticker, &api_ticker, &source, self.itick_api_key.as_deref())
             .await?;
 
         // Update DB
@@ -637,10 +640,7 @@ mod tests {
         }
 
         async fn fetch_icon(&self, api_ticker: &str) -> Result<Option<String>, AppError> {
-            self.icon_calls
-                .lock()
-                .unwrap()
-                .push(api_ticker.to_string());
+            self.icon_calls.lock().unwrap().push(api_ticker.to_string());
             Ok(Some(format!("https://icons.example/{}.png", api_ticker)))
         }
     }
@@ -840,7 +840,9 @@ mod tests {
             .update_base_currency(Uuid::new_v4(), "BAD".to_string())
             .await
             .unwrap_err();
-        assert!(matches!(err, AppError::ValidationError(msg) if msg == "Invalid currency code: BAD"));
+        assert!(
+            matches!(err, AppError::ValidationError(msg) if msg == "Invalid currency code: BAD")
+        );
     }
 
     #[tokio::test]

@@ -29,8 +29,11 @@ pub trait PocketRepo: Send + Sync {
 
 #[async_trait]
 pub trait PocketTransactionRepo: Send + Sync {
-    async fn get_pocket_balance(&self, user_id: Uuid, pocket_id: Uuid)
-        -> Result<rust_decimal::Decimal, AppError>;
+    async fn get_pocket_balance(
+        &self,
+        user_id: Uuid,
+        pocket_id: Uuid,
+    ) -> Result<rust_decimal::Decimal, AppError>;
 }
 
 #[async_trait]
@@ -210,12 +213,9 @@ mod tests {
             icon: Option<String>,
         ) -> Result<Uuid, AppError> {
             let mut state = self.state.lock().unwrap();
-            state.create_calls.push((
-                user_id,
-                name.to_string(),
-                description,
-                icon,
-            ));
+            state
+                .create_calls
+                .push((user_id, name.to_string(), description, icon));
             Ok(Uuid::new_v4())
         }
 
@@ -307,8 +307,13 @@ mod tests {
             icon: None,
         };
 
-        let err = service.create_pocket(Uuid::new_v4(), req).await.unwrap_err();
-        assert!(matches!(err, AppError::ValidationError(msg) if msg == "Pocket name cannot be empty"));
+        let err = service
+            .create_pocket(Uuid::new_v4(), req)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, AppError::ValidationError(msg) if msg == "Pocket name cannot be empty")
+        );
     }
 
     #[tokio::test]
@@ -345,7 +350,9 @@ mod tests {
             .update_pocket(Uuid::new_v4(), Uuid::new_v4(), req)
             .await
             .unwrap_err();
-        assert!(matches!(err, AppError::ValidationError(msg) if msg == "Pocket name cannot be empty"));
+        assert!(
+            matches!(err, AppError::ValidationError(msg) if msg == "Pocket name cannot be empty")
+        );
     }
 
     #[tokio::test]
@@ -377,10 +384,7 @@ mod tests {
         };
         let service = make_service(pocket_repo, transaction_repo);
 
-        let detail = service
-            .get_pocket(pocket_id, Uuid::new_v4())
-            .await
-            .unwrap();
+        let detail = service.get_pocket(pocket_id, Uuid::new_v4()).await.unwrap();
         assert_eq!(detail.id, pocket_id);
         assert_eq!(detail.balance, Decimal::new(25, 0));
     }

@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Datelike, Duration, Months, Timelike, Utc};
 use rust_decimal::Decimal;
 use uuid::Uuid;
 
@@ -62,10 +62,11 @@ pub trait TransactionRepo: Send + Sync {
     ) -> Result<(), AppError>;
     async fn delete(&self, id: Uuid, user_id: Uuid) -> Result<u64, AppError>;
     async fn restore(&self, id: Uuid, user_id: Uuid) -> Result<u64, AppError>;
-    async fn get_transaction(&self, id: Uuid, user_id: Uuid) -> Result<TransactionDetail, AppError>;
+    async fn get_transaction(&self, id: Uuid, user_id: Uuid)
+    -> Result<TransactionDetail, AppError>;
     async fn get_net_cash(&self, user_id: Uuid) -> Result<Decimal, AppError>;
     async fn get_pocket_balance(&self, user_id: Uuid, pocket_id: Uuid)
-        -> Result<Decimal, AppError>;
+    -> Result<Decimal, AppError>;
 }
 
 #[async_trait]
@@ -149,8 +150,10 @@ impl TransactionRepo for TransactionRepository {
         limit: i64,
         offset: i64,
     ) -> Result<Vec<crate::schemas::Transaction>, AppError> {
-        self.find_by_user_and_date(user_id, start_date, end_date, pocket_id, search, limit, offset)
-            .await
+        self.find_by_user_and_date(
+            user_id, start_date, end_date, pocket_id, search, limit, offset,
+        )
+        .await
     }
 
     async fn count_by_user_and_date(
@@ -209,7 +212,11 @@ impl TransactionRepo for TransactionRepository {
         self.restore(id, user_id).await
     }
 
-    async fn get_transaction(&self, id: Uuid, user_id: Uuid) -> Result<TransactionDetail, AppError> {
+    async fn get_transaction(
+        &self,
+        id: Uuid,
+        user_id: Uuid,
+    ) -> Result<TransactionDetail, AppError> {
         self.get_transaction(id, user_id).await
     }
 
@@ -303,27 +310,26 @@ where
         }
 
         let base_currency = self.settings_repo.get_base_currency(user_id).await?;
-        let (amount, original_currency, original_amount, exchange_rate) = if let Some(currency) =
-            &req.currency_code
-        {
-            if currency != &base_currency {
-                let rate = self
-                    .exchange_rate_provider
-                    .fetch_rate(currency, &base_currency)
-                    .await?;
-                let converted_amount = req.amount * rate;
-                (
-                    converted_amount,
-                    Some(currency.clone()),
-                    Some(req.amount),
-                    Some(rate),
-                )
+        let (amount, original_currency, original_amount, exchange_rate) =
+            if let Some(currency) = &req.currency_code {
+                if currency != &base_currency {
+                    let rate = self
+                        .exchange_rate_provider
+                        .fetch_rate(currency, &base_currency)
+                        .await?;
+                    let converted_amount = req.amount * rate;
+                    (
+                        converted_amount,
+                        Some(currency.clone()),
+                        Some(req.amount),
+                        Some(rate),
+                    )
+                } else {
+                    (req.amount, None, None, None)
+                }
             } else {
                 (req.amount, None, None, None)
-            }
-        } else {
-            (req.amount, None, None, None)
-        };
+            };
 
         let description = req.description.filter(|d| !d.trim().is_empty());
 
@@ -423,11 +429,28 @@ where
         }
 
         let net_income = total_income - total_spent;
+        let comparison_percentage = if is_full_month_range(start_date, end_date) {
+            let (previous_start, previous_end) = previous_month_bounds(start_date)?;
+            let previous_categories = self
+                .transaction_repo
+                .get_spending_analysis(user_id, previous_start, previous_end)
+                .await?;
+
+            let previous_total_spent = previous_categories
+                .iter()
+                .filter(|cat| !cat.is_income)
+                .fold(Decimal::ZERO, |acc, cat| acc + cat.total);
+
+            calculate_percentage_change(total_spent, previous_total_spent)
+        } else {
+            None
+        };
 
         Ok(crate::schemas::SpendingAnalysisResponse {
             total_income,
             total_spent,
             net_income,
+            comparison_percentage,
             categories,
         })
     }
@@ -576,17 +599,78 @@ where
     }
 }
 
+fn is_full_month_range(start_date: DateTime<Utc>, end_date: DateTime<Utc>) -> bool {
+    if start_date.year() != end_date.year() || start_date.month() != end_date.month() {
+        return false;
+    }
+
+    let last_day = last_day_of_month(start_date.year(), start_date.month());
+
+    start_date.day() == 1
+        && start_date.hour() == 0
+        && start_date.minute() == 0
+        && start_date.second() == 0
+        && start_date.nanosecond() == 0
+        && end_date.day() == last_day
+        && end_date.hour() == 23
+        && end_date.minute() == 59
+        && end_date.second() == 59
+}
+
+fn previous_month_bounds(
+    current_month_start: DateTime<Utc>,
+) -> Result<(DateTime<Utc>, DateTime<Utc>), AppError> {
+    let previous_month_start_date = current_month_start
+        .date_naive()
+        .checked_sub_months(Months::new(1))
+        .ok_or_else(|| {
+            AppError::InternalServerError("Failed to compute previous month bounds".to_string())
+        })?;
+
+    let previous_month_start = DateTime::<Utc>::from_naive_utc_and_offset(
+        previous_month_start_date
+            .and_hms_nano_opt(0, 0, 0, 0)
+            .ok_or_else(|| {
+                AppError::InternalServerError("Failed to compute previous month start".to_string())
+            })?,
+        Utc,
+    );
+    let previous_month_end = current_month_start - Duration::nanoseconds(1);
+
+    Ok((previous_month_start, previous_month_end))
+}
+
+fn calculate_percentage_change(current: Decimal, previous: Decimal) -> Option<Decimal> {
+    if previous == Decimal::ZERO {
+        return None;
+    }
+
+    Some((current - previous) / previous * Decimal::new(100, 0))
+}
+
+fn last_day_of_month(year: i32, month: u32) -> u32 {
+    let (next_year, next_month) = if month == 12 {
+        (year + 1, 1)
+    } else {
+        (year, month + 1)
+    };
+
+    let next_month_first =
+        chrono::NaiveDate::from_ymd_opt(next_year, next_month, 1).expect("valid month start");
+    (next_month_first - Duration::days(1)).day()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         ExchangeRateProvider, PocketRepo, SettingsRepo, TransactionRepo, TransactionService,
     };
-    use async_trait::async_trait;
-    use chrono::{DateTime, Utc};
     use crate::error::AppError;
     use crate::schemas::{
         Category, CategorySummary, CreateTransaction, Pocket, Transaction, TransferRequest,
     };
+    use async_trait::async_trait;
+    use chrono::{DateTime, TimeZone, Timelike, Utc};
     use rust_decimal::Decimal;
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
@@ -601,6 +685,8 @@ mod tests {
         create_calls: Vec<CreateCall>,
         find_args: Option<FindArgs>,
         count_args: Option<CountArgs>,
+        spending_analysis_calls: Vec<SpendingAnalysisCall>,
+        spending_analysis_results: Vec<SpendingAnalysisResult>,
         category_by_name_calls: Vec<String>,
         get_pocket_balance: Decimal,
         categories: HashMap<String, CategoryStub>,
@@ -614,6 +700,8 @@ mod tests {
                 create_calls: Vec::new(),
                 find_args: None,
                 count_args: None,
+                spending_analysis_calls: Vec::new(),
+                spending_analysis_results: Vec::new(),
                 category_by_name_calls: Vec::new(),
                 get_pocket_balance: Decimal::ZERO,
                 categories: HashMap::new(),
@@ -665,6 +753,19 @@ mod tests {
         end_date: Option<DateTime<Utc>>,
         pocket_id: Option<Uuid>,
         search: Option<String>,
+    }
+
+    #[derive(Clone)]
+    struct SpendingAnalysisCall {
+        start_date: DateTime<Utc>,
+        end_date: DateTime<Utc>,
+    }
+
+    #[derive(Clone)]
+    struct SpendingAnalysisResult {
+        start_date: DateTime<Utc>,
+        end_date: DateTime<Utc>,
+        categories: Vec<CategorySummary>,
     }
 
     #[async_trait]
@@ -761,10 +862,21 @@ mod tests {
         async fn get_spending_analysis(
             &self,
             _user_id: Uuid,
-            _start_date: DateTime<Utc>,
-            _end_date: DateTime<Utc>,
+            start_date: DateTime<Utc>,
+            end_date: DateTime<Utc>,
         ) -> Result<Vec<CategorySummary>, AppError> {
-            Ok(Vec::new())
+            let mut state = self.state.lock().unwrap();
+            state.spending_analysis_calls.push(SpendingAnalysisCall {
+                start_date,
+                end_date,
+            });
+
+            Ok(state
+                .spending_analysis_results
+                .iter()
+                .find(|result| result.start_date == start_date && result.end_date == end_date)
+                .map(|result| result.categories.clone())
+                .unwrap_or_default())
         }
 
         async fn update(
@@ -871,11 +983,7 @@ mod tests {
             Ok(true)
         }
 
-        async fn set_base_currency(
-            &self,
-            _user_id: Uuid,
-            _currency: &str,
-        ) -> Result<(), AppError> {
+        async fn set_base_currency(&self, _user_id: Uuid, _currency: &str) -> Result<(), AppError> {
             Ok(())
         }
     }
@@ -904,6 +1012,22 @@ mod tests {
             is_default: true,
             created_at: None,
         }
+    }
+
+    fn utc_datetime(
+        year: i32,
+        month: u32,
+        day: u32,
+        hour: u32,
+        minute: u32,
+        second: u32,
+        nanosecond: u32,
+    ) -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(year, month, day, hour, minute, second)
+            .single()
+            .unwrap()
+            .with_nanosecond(nanosecond)
+            .unwrap()
     }
 
     fn make_transaction_service(
@@ -984,7 +1108,10 @@ mod tests {
             pocket_id: None,
         };
 
-        let id = service.create_transaction(Uuid::new_v4(), req).await.unwrap();
+        let id = service
+            .create_transaction(Uuid::new_v4(), req)
+            .await
+            .unwrap();
         assert_eq!(id, tx_repo.state.lock().unwrap().next_create_id);
 
         let state = tx_repo.state.lock().unwrap();
@@ -1024,7 +1151,10 @@ mod tests {
             pocket_id: None,
         };
 
-        service.create_transaction(Uuid::new_v4(), req).await.unwrap();
+        service
+            .create_transaction(Uuid::new_v4(), req)
+            .await
+            .unwrap();
         let state = tx_repo.state.lock().unwrap();
         let call = state.create_calls.first().expect("create call");
         assert_eq!(call.pocket_id, default_id);
@@ -1059,7 +1189,10 @@ mod tests {
             pocket_id: None,
         };
 
-        service.create_transaction(Uuid::new_v4(), req).await.unwrap();
+        service
+            .create_transaction(Uuid::new_v4(), req)
+            .await
+            .unwrap();
         let state = tx_repo.state.lock().unwrap();
         let call = state.create_calls.first().expect("create call");
         assert_eq!(call.amount, Decimal::new(12, 0));
@@ -1093,7 +1226,9 @@ mod tests {
             .get_transactions(Uuid::new_v4(), Some(start), Some(end), None, None, 1, 20)
             .await
             .unwrap_err();
-        assert!(matches!(err, AppError::ValidationError(msg) if msg == "End date cannot be before start date"));
+        assert!(
+            matches!(err, AppError::ValidationError(msg) if msg == "End date cannot be before start date")
+        );
     }
 
     #[tokio::test]
@@ -1130,6 +1265,116 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn get_spending_analysis_returns_comparison_for_full_month_range() {
+        let start = utc_datetime(2025, 3, 1, 0, 0, 0, 0);
+        let end = utc_datetime(2025, 3, 31, 23, 59, 59, 999_000_000);
+        let previous_start = utc_datetime(2025, 2, 1, 0, 0, 0, 0);
+        let previous_end = utc_datetime(2025, 2, 28, 23, 59, 59, 999_999_999);
+
+        let mut tx_state = MockTransactionState::default();
+        tx_state.spending_analysis_results = vec![
+            SpendingAnalysisResult {
+                start_date: start,
+                end_date: end,
+                categories: vec![
+                    CategorySummary {
+                        category: "Salary".to_string(),
+                        total: Decimal::new(1000, 0),
+                        is_income: true,
+                        icon: "payments".to_string(),
+                    },
+                    CategorySummary {
+                        category: "Food".to_string(),
+                        total: Decimal::new(200, 0),
+                        is_income: false,
+                        icon: "restaurant".to_string(),
+                    },
+                ],
+            },
+            SpendingAnalysisResult {
+                start_date: previous_start,
+                end_date: previous_end,
+                categories: vec![CategorySummary {
+                    category: "Food".to_string(),
+                    total: Decimal::new(100, 0),
+                    is_income: false,
+                    icon: "restaurant".to_string(),
+                }],
+            },
+        ];
+
+        let tx_repo = MockTransactionRepo {
+            state: Arc::new(Mutex::new(tx_state)),
+        };
+        let pocket_repo = MockPocketRepo {
+            state: Arc::new(Mutex::new(MockPocketState {
+                default_pocket: default_pocket(Uuid::new_v4()),
+                ..Default::default()
+            })),
+        };
+        let settings_repo = MockSettingsRepo {
+            base_currency: "USD".to_string(),
+        };
+        let fx = MockExchangeRateProvider::default();
+        let service = make_transaction_service(tx_repo.clone(), pocket_repo, settings_repo, fx);
+
+        let response = service
+            .get_spending_analysis(Uuid::new_v4(), start, end)
+            .await
+            .unwrap();
+
+        assert_eq!(response.comparison_percentage, Some(Decimal::new(100, 0)));
+
+        let state = tx_repo.state.lock().unwrap();
+        assert_eq!(state.spending_analysis_calls.len(), 2);
+        assert_eq!(state.spending_analysis_calls[1].start_date, previous_start);
+        assert_eq!(state.spending_analysis_calls[1].end_date, previous_end);
+    }
+
+    #[tokio::test]
+    async fn get_spending_analysis_returns_null_comparison_for_custom_range() {
+        let start = utc_datetime(2025, 3, 2, 0, 0, 0, 0);
+        let end = utc_datetime(2025, 3, 31, 23, 59, 59, 999_000_000);
+
+        let mut tx_state = MockTransactionState::default();
+        tx_state.spending_analysis_results = vec![SpendingAnalysisResult {
+            start_date: start,
+            end_date: end,
+            categories: vec![CategorySummary {
+                category: "Food".to_string(),
+                total: Decimal::new(200, 0),
+                is_income: false,
+                icon: "restaurant".to_string(),
+            }],
+        }];
+
+        let tx_repo = MockTransactionRepo {
+            state: Arc::new(Mutex::new(tx_state)),
+        };
+        let pocket_repo = MockPocketRepo {
+            state: Arc::new(Mutex::new(MockPocketState {
+                default_pocket: default_pocket(Uuid::new_v4()),
+                ..Default::default()
+            })),
+        };
+        let settings_repo = MockSettingsRepo {
+            base_currency: "USD".to_string(),
+        };
+        let fx = MockExchangeRateProvider::default();
+        let service = make_transaction_service(tx_repo.clone(), pocket_repo, settings_repo, fx);
+
+        let response = service
+            .get_spending_analysis(Uuid::new_v4(), start, end)
+            .await
+            .unwrap();
+
+        assert_eq!(response.comparison_percentage, None);
+
+        let state = tx_repo.state.lock().unwrap();
+        assert_eq!(state.spending_analysis_calls.len(), 1);
+    }
+
+    #[tokio::test]
     async fn transfer_funds_rejects_same_pocket() {
         let tx_repo = MockTransactionRepo::default();
         let pocket_repo = MockPocketRepo {
@@ -1156,7 +1401,9 @@ mod tests {
             .transfer_funds(Uuid::new_v4(), req)
             .await
             .unwrap_err();
-        assert!(matches!(err, AppError::ValidationError(msg) if msg == "Cannot transfer to the same pocket"));
+        assert!(
+            matches!(err, AppError::ValidationError(msg) if msg == "Cannot transfer to the same pocket")
+        );
     }
 
     #[tokio::test]
@@ -1173,8 +1420,12 @@ mod tests {
             default_pocket: default_pocket(source_id),
             ..Default::default()
         };
-        pocket_state.pockets.insert(source_id, default_pocket(source_id));
-        pocket_state.pockets.insert(dest_id, default_pocket(dest_id));
+        pocket_state
+            .pockets
+            .insert(source_id, default_pocket(source_id));
+        pocket_state
+            .pockets
+            .insert(dest_id, default_pocket(dest_id));
         let pocket_repo = MockPocketRepo {
             state: Arc::new(Mutex::new(pocket_state)),
         };
@@ -1195,7 +1446,9 @@ mod tests {
             .transfer_funds(Uuid::new_v4(), req)
             .await
             .unwrap_err();
-        assert!(matches!(err, AppError::ValidationError(msg) if msg == "Insufficient funds in source pocket"));
+        assert!(
+            matches!(err, AppError::ValidationError(msg) if msg == "Insufficient funds in source pocket")
+        );
     }
 
     #[tokio::test]
@@ -1230,8 +1483,12 @@ mod tests {
             default_pocket: default_pocket(source_id),
             ..Default::default()
         };
-        pocket_state.pockets.insert(source_id, default_pocket(source_id));
-        pocket_state.pockets.insert(dest_id, default_pocket(dest_id));
+        pocket_state
+            .pockets
+            .insert(source_id, default_pocket(source_id));
+        pocket_state
+            .pockets
+            .insert(dest_id, default_pocket(dest_id));
         let pocket_repo = MockPocketRepo {
             state: Arc::new(Mutex::new(pocket_state)),
         };
@@ -1254,9 +1511,15 @@ mod tests {
         assert_eq!(state.create_calls.len(), 2);
         assert_eq!(state.create_calls[0].category_id, 101);
         assert_eq!(state.create_calls[0].pocket_id, source_id);
-        assert_eq!(state.create_calls[0].description, Some("Transfer Out".to_string()));
+        assert_eq!(
+            state.create_calls[0].description,
+            Some("Transfer Out".to_string())
+        );
         assert_eq!(state.create_calls[1].category_id, 102);
         assert_eq!(state.create_calls[1].pocket_id, dest_id);
-        assert_eq!(state.create_calls[1].description, Some("Transfer In".to_string()));
+        assert_eq!(
+            state.create_calls[1].description,
+            Some("Transfer In".to_string())
+        );
     }
 }

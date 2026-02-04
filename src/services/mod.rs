@@ -12,6 +12,11 @@ pub use auth::{
     TokenIssuer,
 };
 pub use finance::FinanceService;
+pub use finance::{
+    ExchangeRateProvider as FinanceExchangeRateProvider, FinancePortfolioRepo, FinanceServiceImpl,
+    FinanceSettingsRepo, FinanceTransactionRepo,
+    HttpExchangeRateProvider as HttpFinanceExchangeRateProvider, HttpPriceProvider, PriceProvider,
+};
 pub use goal::{GoalEntryRepo, GoalPocketRepo, GoalRepo, GoalService, GoalServiceImpl};
 pub use pocket::{PocketRepo, PocketService, PocketServiceImpl, PocketTransactionRepo};
 pub use subscription::SubscriptionService;
@@ -20,8 +25,3 @@ pub use transaction::{
     SettingsRepo, TransactionRepo, TransactionService, TransactionServiceImpl,
 };
 pub use user_subscription::UserSubscriptionService;
-pub use finance::{
-    ExchangeRateProvider as FinanceExchangeRateProvider, FinanceServiceImpl, FinanceSettingsRepo,
-    FinancePortfolioRepo, FinanceTransactionRepo, HttpExchangeRateProvider as HttpFinanceExchangeRateProvider,
-    HttpPriceProvider, PriceProvider,
-};

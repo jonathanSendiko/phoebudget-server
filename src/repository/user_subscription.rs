@@ -241,7 +241,11 @@ impl UserSubscriptionRepository {
         Ok(rows)
     }
 
-    pub async fn update_next_charge_date(&self, id: Uuid, next_date: NaiveDate) -> Result<(), AppError> {
+    pub async fn update_next_charge_date(
+        &self,
+        id: Uuid,
+        next_date: NaiveDate,
+    ) -> Result<(), AppError> {
         sqlx::query!(
             "UPDATE user_subscriptions SET next_charge_date = $1 WHERE id = $2",
             next_date,
