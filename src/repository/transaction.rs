@@ -352,6 +352,7 @@ impl TransactionRepository {
         original_currency: Option<String>,
         original_amount: Option<Decimal>,
         exchange_rate: Option<Decimal>,
+        pocket_id: Option<Uuid>,
     ) -> Result<(), AppError> {
         // Build dynamic query
         // simple way:
@@ -365,7 +366,8 @@ impl TransactionRepository {
                 occurred_at = COALESCE($6, occurred_at),
                 original_currency = COALESCE($7, original_currency),
                 original_amount = COALESCE($8, original_amount),
-                exchange_rate = COALESCE($9, exchange_rate)
+                exchange_rate = COALESCE($9, exchange_rate),
+                pocket_id = COALESCE($10, pocket_id)
             WHERE id = $1 AND user_id = $2
             "#,
             id,
@@ -376,7 +378,8 @@ impl TransactionRepository {
             occurred_at,
             original_currency,
             original_amount,
-            exchange_rate
+            exchange_rate,
+            pocket_id
         )
         .execute(&self.pool)
         .await?;

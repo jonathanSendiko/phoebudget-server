@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE transactions \n            SET \n                amount = COALESCE($3, amount),\n                description = COALESCE($4, description),\n                category_id = COALESCE($5, category_id),\n                occurred_at = COALESCE($6, occurred_at),\n                original_currency = COALESCE($7, original_currency),\n                original_amount = COALESCE($8, original_amount),\n                exchange_rate = COALESCE($9, exchange_rate),\n                pocket_id = COALESCE($10, pocket_id)\n            WHERE id = $1 AND user_id = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Numeric",
+        "Text",
+        "Int4",
+        "Timestamptz",
+        "Varchar",
+        "Numeric",
+        "Numeric",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "39f3d55e4a701df3e9bbe01342b086097c51160853e418f2b9fea320d48e08d9"
+}

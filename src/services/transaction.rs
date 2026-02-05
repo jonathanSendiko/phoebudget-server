@@ -63,6 +63,7 @@ pub trait TransactionRepo: Send + Sync {
         original_currency: Option<String>,
         original_amount: Option<Decimal>,
         exchange_rate: Option<Decimal>,
+        pocket_id: Option<Uuid>,
     ) -> Result<(), AppError>;
     async fn delete(&self, id: Uuid, user_id: Uuid) -> Result<u64, AppError>;
     async fn restore(&self, id: Uuid, user_id: Uuid) -> Result<u64, AppError>;
@@ -213,6 +214,7 @@ impl TransactionRepo for TransactionRepository {
         original_currency: Option<String>,
         original_amount: Option<Decimal>,
         exchange_rate: Option<Decimal>,
+        pocket_id: Option<Uuid>,
     ) -> Result<(), AppError> {
         self.update(
             id,
@@ -224,6 +226,7 @@ impl TransactionRepo for TransactionRepository {
             original_currency,
             original_amount,
             exchange_rate,
+            pocket_id,
         )
         .await
     }
@@ -506,6 +509,9 @@ where
             }
         }
         let description = req.description.filter(|d| !d.trim().is_empty());
+        if let Some(pocket_id) = req.pocket_id {
+            self.pocket_repo.get_by_id(pocket_id, user_id).await?;
+        }
 
         self.transaction_repo
             .update(
@@ -518,6 +524,7 @@ where
                 req.original_currency,
                 req.original_amount,
                 req.exchange_rate,
+                req.pocket_id,
             )
             .await
     }
@@ -705,6 +712,7 @@ mod tests {
     use crate::error::AppError;
     use crate::schemas::{
         Category, CategorySummary, CreateTransaction, Pocket, Transaction, TransferRequest,
+        UpdateTransaction,
     };
     use async_trait::async_trait;
     use chrono::{DateTime, TimeZone, Timelike, Utc};
@@ -939,6 +947,7 @@ mod tests {
             _original_currency: Option<String>,
             _original_amount: Option<Decimal>,
             _exchange_rate: Option<Decimal>,
+            _pocket_id: Option<Uuid>,
         ) -> Result<(), AppError> {
             Ok(())
         }
@@ -1211,6 +1220,43 @@ mod tests {
 
         let pocket_state = pocket_repo.state.lock().unwrap();
         assert_eq!(pocket_state.get_default_calls, 1);
+    }
+
+    #[tokio::test]
+    async fn update_transaction_validates_pocket_when_provided() {
+        let tx_repo = MockTransactionRepo::default();
+        let pocket_id = Uuid::new_v4();
+        let pocket_repo = MockPocketRepo {
+            state: Arc::new(Mutex::new(MockPocketState {
+                pockets: vec![(pocket_id, default_pocket(pocket_id))]
+                    .into_iter()
+                    .collect(),
+                ..Default::default()
+            })),
+        };
+        let settings_repo = MockSettingsRepo {
+            base_currency: "USD".to_string(),
+        };
+        let fx = MockExchangeRateProvider::default();
+        let service = make_transaction_service(tx_repo, pocket_repo.clone(), settings_repo, fx);
+
+        let req = UpdateTransaction {
+            amount: None,
+            description: None,
+            category_id: None,
+            occurred_at: None,
+            original_currency: None,
+            original_amount: None,
+            exchange_rate: None,
+            pocket_id: Some(pocket_id),
+        };
+
+        service
+            .update_transaction(Uuid::new_v4(), Uuid::new_v4(), req)
+            .await
+            .unwrap();
+
+        assert_eq!(pocket_repo.state.lock().unwrap().get_by_id_calls, 1);
     }
 
     #[tokio::test]
