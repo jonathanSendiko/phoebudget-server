@@ -10,7 +10,10 @@ pub mod user;
 pub mod user_subscription;
 
 pub use auth::{AuthResponse, LoginRequest, RefreshTokenRequest, RefreshTokenRow, RegisterRequest};
-pub use finance::{FinancialHealth, UpdateCurrency};
+pub use finance::{
+    FinancialHealth, MonthlyCashFlowRow, NetWorthHistoryPoint, NetWorthHistoryResponse,
+    UpdateCurrency,
+};
 pub use goal::{
     CreateGoal, CreateGoalEntry, GoalDetail, GoalEntry, GoalId, GoalSummary, UpdateGoal,
 };

@@ -1,10 +1,13 @@
-use axum::{Json, extract::State};
+use axum::{Json, extract::State, extract::Query};
 
 use crate::AppState;
 use crate::auth::UserId;
 use crate::error::AppError;
 use crate::response::ApiResponse;
-use crate::schemas::{CreatePortfolioItem, FinancialHealth, UpdateCurrency, UpdateInvestment};
+use crate::schemas::{
+    CreatePortfolioItem, DateRangeParams, FinancialHealth, NetWorthHistoryResponse, UpdateCurrency,
+    UpdateInvestment,
+};
 
 pub async fn get_financial_health(
     State(state): State<AppState>,
@@ -15,6 +18,18 @@ pub async fn get_financial_health(
         .get_financial_health(user_id.0)
         .await?;
     Ok(Json(ApiResponse::success(health, None)))
+}
+
+pub async fn get_net_worth_history(
+    State(state): State<AppState>,
+    user_id: UserId,
+    Query(params): Query<DateRangeParams>,
+) -> Result<Json<ApiResponse<NetWorthHistoryResponse>>, AppError> {
+    let history = state
+        .finance_service()
+        .get_net_worth_history(user_id.0, params.start_date, params.end_date)
+        .await?;
+    Ok(Json(ApiResponse::success(history, None)))
 }
 
 pub async fn refresh_portfolio(

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT \n                COALESCE(SUM(\n                    CASE WHEN c.is_income THEN t.amount \n                    ELSE -t.amount \n                    END\n                ), 0) as \"net_cash!\"\n            FROM transactions t\n            JOIN categories c ON t.category_id = c.id\n            WHERE t.user_id = $1 \n              AND t.occurred_at < $2\n              AND t.deleted_at IS NULL\n              AND (c.exclude_from_analysis = FALSE OR c.exclude_from_analysis IS NULL)\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "net_cash!",
+        "type_info": "Numeric"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "ab81bba8f48dce192e796dcebd2a54206039be194023b0c74e79a1c26d604d41"
+}
