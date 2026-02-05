@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use uuid::Uuid;
 
 use super::common::{round_currency, round_currency_option};
@@ -36,10 +36,33 @@ pub struct TransactionQueryParams {
     pub end_date: Option<DateTime<Utc>>,
     pub pocket_id: Option<Uuid>,
     pub search: Option<String>,
+    pub category_id: Option<i32>,
+    #[serde(default, deserialize_with = "deserialize_csv_i32_opt")]
+    pub category_ids: Option<Vec<i32>>,
     #[serde(default = "default_page")]
     pub page: i64,
     #[serde(default = "default_limit")]
     pub limit: i64,
+}
+
+impl TransactionQueryParams {
+    pub fn category_filter(&self) -> Option<Vec<i32>> {
+        let mut ids = Vec::new();
+        if let Some(id) = self.category_id {
+            ids.push(id);
+        }
+        if let Some(list) = &self.category_ids {
+            ids.extend(list.iter().copied());
+        }
+
+        if ids.is_empty() {
+            None
+        } else {
+            ids.sort_unstable();
+            ids.dedup();
+            Some(ids)
+        }
+    }
 }
 
 fn default_page() -> i64 {
@@ -48,6 +71,44 @@ fn default_page() -> i64 {
 
 fn default_limit() -> i64 {
     10
+}
+
+fn deserialize_csv_i32_opt<'de, D>(deserializer: D) -> Result<Option<Vec<i32>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum CsvOrVec {
+        Vec(Vec<i32>),
+        String(String),
+    }
+
+    let parsed = Option::<CsvOrVec>::deserialize(deserializer)?;
+    match parsed {
+        None => Ok(None),
+        Some(CsvOrVec::Vec(values)) => Ok(if values.is_empty() { None } else { Some(values) }),
+        Some(CsvOrVec::String(value)) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                return Ok(None);
+            }
+
+            let mut ids = Vec::new();
+            for item in trimmed.split(',') {
+                let item = item.trim();
+                if item.is_empty() {
+                    continue;
+                }
+                let id = item
+                    .parse::<i32>()
+                    .map_err(serde::de::Error::custom)?;
+                ids.push(id);
+            }
+
+            Ok(if ids.is_empty() { None } else { Some(ids) })
+        }
+    }
 }
 
 #[derive(Deserialize)]

@@ -31,6 +31,7 @@ pub trait TransactionRepo: Send + Sync {
         end_date: Option<DateTime<Utc>>,
         pocket_id: Option<Uuid>,
         search: Option<String>,
+        category_ids: Option<Vec<i32>>,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<crate::schemas::Transaction>, AppError>;
@@ -41,6 +42,7 @@ pub trait TransactionRepo: Send + Sync {
         end_date: Option<DateTime<Utc>>,
         pocket_id: Option<Uuid>,
         search: Option<String>,
+        category_ids: Option<Vec<i32>>,
     ) -> Result<i64, AppError>;
     async fn get_spending_analysis(
         &self,
@@ -147,11 +149,19 @@ impl TransactionRepo for TransactionRepository {
         end_date: Option<DateTime<Utc>>,
         pocket_id: Option<Uuid>,
         search: Option<String>,
+        category_ids: Option<Vec<i32>>,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<crate::schemas::Transaction>, AppError> {
         self.find_by_user_and_date(
-            user_id, start_date, end_date, pocket_id, search, limit, offset,
+            user_id,
+            start_date,
+            end_date,
+            pocket_id,
+            search,
+            category_ids,
+            limit,
+            offset,
         )
         .await
     }
@@ -163,8 +173,9 @@ impl TransactionRepo for TransactionRepository {
         end_date: Option<DateTime<Utc>>,
         pocket_id: Option<Uuid>,
         search: Option<String>,
+        category_ids: Option<Vec<i32>>,
     ) -> Result<i64, AppError> {
-        self.count_by_user_and_date(user_id, start_date, end_date, pocket_id, search)
+        self.count_by_user_and_date(user_id, start_date, end_date, pocket_id, search, category_ids)
             .await
     }
 
@@ -361,6 +372,7 @@ where
         end_date: Option<DateTime<Utc>>,
         pocket_id: Option<Uuid>,
         search: Option<String>,
+        category_ids: Option<Vec<i32>>,
         page: i64,
         limit: i64,
     ) -> Result<crate::schemas::PaginatedTransactions, AppError> {
@@ -377,6 +389,7 @@ where
         let page = page.max(1);
         let offset = (page - 1) * limit;
 
+        let category_ids = category_ids.filter(|ids| !ids.is_empty());
         let transactions = self
             .transaction_repo
             .find_by_user_and_date(
@@ -385,6 +398,7 @@ where
                 end_date,
                 pocket_id,
                 search.clone(),
+                category_ids.clone(),
                 limit,
                 offset,
             )
@@ -392,7 +406,7 @@ where
 
         let total = self
             .transaction_repo
-            .count_by_user_and_date(user_id, start_date, end_date, pocket_id, search)
+            .count_by_user_and_date(user_id, start_date, end_date, pocket_id, search, category_ids)
             .await?;
 
         let total_pages = (total as f64 / limit as f64).ceil() as i64;
@@ -741,6 +755,7 @@ mod tests {
         end_date: Option<DateTime<Utc>>,
         pocket_id: Option<Uuid>,
         search: Option<String>,
+        category_ids: Option<Vec<i32>>,
         limit: i64,
         offset: i64,
     }
@@ -753,6 +768,7 @@ mod tests {
         end_date: Option<DateTime<Utc>>,
         pocket_id: Option<Uuid>,
         search: Option<String>,
+        category_ids: Option<Vec<i32>>,
     }
 
     #[derive(Clone)]
@@ -824,6 +840,7 @@ mod tests {
             end_date: Option<DateTime<Utc>>,
             pocket_id: Option<Uuid>,
             search: Option<String>,
+            category_ids: Option<Vec<i32>>,
             limit: i64,
             offset: i64,
         ) -> Result<Vec<Transaction>, AppError> {
@@ -834,6 +851,7 @@ mod tests {
                 end_date,
                 pocket_id,
                 search,
+                category_ids,
                 limit,
                 offset,
             });
@@ -847,6 +865,7 @@ mod tests {
             end_date: Option<DateTime<Utc>>,
             pocket_id: Option<Uuid>,
             search: Option<String>,
+            category_ids: Option<Vec<i32>>,
         ) -> Result<i64, AppError> {
             let mut state = self.state.lock().unwrap();
             state.count_args = Some(CountArgs {
@@ -855,6 +874,7 @@ mod tests {
                 end_date,
                 pocket_id,
                 search,
+                category_ids,
             });
             Ok(state.total_count)
         }
@@ -1223,7 +1243,7 @@ mod tests {
         let end = DateTime::<Utc>::from_timestamp(1_700_000_000, 0).unwrap();
 
         let err = service
-            .get_transactions(Uuid::new_v4(), Some(start), Some(end), None, None, 1, 20)
+            .get_transactions(Uuid::new_v4(), Some(start), Some(end), None, None, None, 1, 20)
             .await
             .unwrap_err();
         assert!(
@@ -1251,7 +1271,7 @@ mod tests {
         let service = make_transaction_service(tx_repo.clone(), pocket_repo, settings_repo, fx);
 
         let response = service
-            .get_transactions(Uuid::new_v4(), None, None, None, None, 0, 1000)
+            .get_transactions(Uuid::new_v4(), None, None, None, None, None, 0, 1000)
             .await
             .unwrap();
         assert_eq!(response.limit, 100);
@@ -1262,6 +1282,47 @@ mod tests {
         let find_args = state.find_args.as_ref().expect("find args");
         assert_eq!(find_args.limit, 100);
         assert_eq!(find_args.offset, 0);
+    }
+
+    #[tokio::test]
+    async fn get_transactions_passes_category_ids() {
+        let mut tx_state = MockTransactionState::default();
+        tx_state.total_count = 5;
+        let tx_repo = MockTransactionRepo {
+            state: Arc::new(Mutex::new(tx_state)),
+        };
+        let pocket_repo = MockPocketRepo {
+            state: Arc::new(Mutex::new(MockPocketState {
+                default_pocket: default_pocket(Uuid::new_v4()),
+                ..Default::default()
+            })),
+        };
+        let settings_repo = MockSettingsRepo {
+            base_currency: "USD".to_string(),
+        };
+        let fx = MockExchangeRateProvider::default();
+        let service = make_transaction_service(tx_repo.clone(), pocket_repo, settings_repo, fx);
+
+        let category_ids = vec![2, 3];
+        service
+            .get_transactions(
+                Uuid::new_v4(),
+                None,
+                None,
+                None,
+                None,
+                Some(category_ids.clone()),
+                1,
+                20,
+            )
+            .await
+            .unwrap();
+
+        let state = tx_repo.state.lock().unwrap();
+        let find_args = state.find_args.as_ref().expect("find args");
+        assert_eq!(find_args.category_ids.as_ref().unwrap(), &category_ids);
+        let count_args = state.count_args.as_ref().expect("count args");
+        assert_eq!(count_args.category_ids.as_ref().unwrap(), &category_ids);
     }
 
     #[tokio::test]
@@ -1329,6 +1390,60 @@ mod tests {
         assert_eq!(state.spending_analysis_calls.len(), 2);
         assert_eq!(state.spending_analysis_calls[1].start_date, previous_start);
         assert_eq!(state.spending_analysis_calls[1].end_date, previous_end);
+    }
+
+    #[tokio::test]
+    async fn get_spending_analysis_returns_negative_comparison_when_spend_decreases() {
+        let start = utc_datetime(2025, 3, 1, 0, 0, 0, 0);
+        let end = utc_datetime(2025, 3, 31, 23, 59, 59, 999_000_000);
+        let previous_start = utc_datetime(2025, 2, 1, 0, 0, 0, 0);
+        let previous_end = utc_datetime(2025, 2, 28, 23, 59, 59, 999_999_999);
+
+        let mut tx_state = MockTransactionState::default();
+        tx_state.spending_analysis_results = vec![
+            SpendingAnalysisResult {
+                start_date: start,
+                end_date: end,
+                categories: vec![CategorySummary {
+                    category: "Food".to_string(),
+                    total: Decimal::new(80, 0),
+                    is_income: false,
+                    icon: "restaurant".to_string(),
+                }],
+            },
+            SpendingAnalysisResult {
+                start_date: previous_start,
+                end_date: previous_end,
+                categories: vec![CategorySummary {
+                    category: "Food".to_string(),
+                    total: Decimal::new(100, 0),
+                    is_income: false,
+                    icon: "restaurant".to_string(),
+                }],
+            },
+        ];
+
+        let tx_repo = MockTransactionRepo {
+            state: Arc::new(Mutex::new(tx_state)),
+        };
+        let pocket_repo = MockPocketRepo {
+            state: Arc::new(Mutex::new(MockPocketState {
+                default_pocket: default_pocket(Uuid::new_v4()),
+                ..Default::default()
+            })),
+        };
+        let settings_repo = MockSettingsRepo {
+            base_currency: "USD".to_string(),
+        };
+        let fx = MockExchangeRateProvider::default();
+        let service = make_transaction_service(tx_repo, pocket_repo, settings_repo, fx);
+
+        let response = service
+            .get_spending_analysis(Uuid::new_v4(), start, end)
+            .await
+            .unwrap();
+
+        assert_eq!(response.comparison_percentage, Some(Decimal::new(-20, 0)));
     }
 
     #[tokio::test]

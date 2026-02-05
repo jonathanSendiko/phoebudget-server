@@ -79,6 +79,7 @@ pub async fn get_transactions(
     user_id: UserId,
     Query(params): Query<TransactionQueryParams>,
 ) -> Result<Json<ApiResponse<PaginatedTransactions>>, AppError> {
+    let category_ids = params.category_filter();
     let result = state
         .transaction_service()
         .get_transactions(
@@ -87,6 +88,7 @@ pub async fn get_transactions(
             params.end_date,
             params.pocket_id,
             params.search,
+            category_ids,
             params.page,
             params.limit,
         )

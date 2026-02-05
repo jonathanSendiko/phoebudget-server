@@ -108,11 +108,14 @@ impl TransactionRepository {
         end_date: Option<DateTime<Utc>>,
         pocket_id: Option<Uuid>,
         search: Option<String>,
+        category_ids: Option<Vec<i32>>,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<Transaction>, AppError> {
         // Prepare search pattern for ILIKE (case-insensitive)
         let search_pattern = search.map(|s| format!("%{}%", s));
+        let category_ids = category_ids.filter(|ids| !ids.is_empty());
+        let category_ids = category_ids.as_ref().map(|ids| ids.as_slice());
 
         let transactions = sqlx::query!(
             r#"
@@ -130,14 +133,16 @@ impl TransactionRepository {
               AND ($2::timestamptz IS NULL OR t.occurred_at <= $2)
               AND ($4::uuid IS NULL OR t.pocket_id = $4)
               AND ($5::text IS NULL OR t.description ILIKE $5)
+              AND ($6::int[] IS NULL OR t.category_id = ANY($6))
             ORDER BY t.occurred_at DESC
-            LIMIT $6 OFFSET $7
+            LIMIT $7 OFFSET $8
             "#,
             start_date,
             end_date,
             user_id,
             pocket_id,
             search_pattern,
+            category_ids,
             limit,
             offset
         )
@@ -177,9 +182,12 @@ impl TransactionRepository {
         end_date: Option<DateTime<Utc>>,
         pocket_id: Option<Uuid>,
         search: Option<String>,
+        category_ids: Option<Vec<i32>>,
     ) -> Result<i64, AppError> {
         // Prepare search pattern for ILIKE (case-insensitive)
         let search_pattern = search.map(|s| format!("%{}%", s));
+        let category_ids = category_ids.filter(|ids| !ids.is_empty());
+        let category_ids = category_ids.as_ref().map(|ids| ids.as_slice());
 
         let result = sqlx::query!(
             r#"
@@ -191,12 +199,14 @@ impl TransactionRepository {
               AND ($2::timestamptz IS NULL OR t.occurred_at <= $2)
               AND ($4::uuid IS NULL OR t.pocket_id = $4)
               AND ($5::text IS NULL OR t.description ILIKE $5)
+              AND ($6::int[] IS NULL OR t.category_id = ANY($6))
             "#,
             start_date,
             end_date,
             user_id,
             pocket_id,
-            search_pattern
+            search_pattern,
+            category_ids
         )
         .fetch_one(&self.pool)
         .await?;

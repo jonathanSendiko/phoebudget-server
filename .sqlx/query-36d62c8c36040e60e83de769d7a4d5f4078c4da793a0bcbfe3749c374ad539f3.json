@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT \n                t.id, t.amount, t.description, t.category_id, t.occurred_at, t.created_at,\n                c.name as \"category_name?\", c.icon as category_icon, COALESCE(c.is_income, FALSE) as \"category_is_income!\",\n                COALESCE(c.exclude_from_analysis, FALSE) as \"category_exclude!\",\n                p.id as \"pocket_id?\", p.name as \"pocket_name?\", p.icon as \"pocket_icon?\"\n            FROM transactions t\n            LEFT JOIN categories c ON t.category_id = c.id\n            LEFT JOIN pockets p ON t.pocket_id = p.id\n            WHERE t.user_id = $3 \n              AND t.deleted_at IS NULL\n              AND ($1::timestamptz IS NULL OR t.occurred_at >= $1)\n              AND ($2::timestamptz IS NULL OR t.occurred_at <= $2)\n              AND ($4::uuid IS NULL OR t.pocket_id = $4)\n              AND ($5::text IS NULL OR t.description ILIKE $5)\n            ORDER BY t.occurred_at DESC\n            LIMIT $6 OFFSET $7\n            ",
+  "query": "\n            SELECT \n                t.id, t.amount, t.description, t.category_id, t.occurred_at, t.created_at,\n                c.name as \"category_name?\", c.icon as category_icon, COALESCE(c.is_income, FALSE) as \"category_is_income!\",\n                COALESCE(c.exclude_from_analysis, FALSE) as \"category_exclude!\",\n                p.id as \"pocket_id?\", p.name as \"pocket_name?\", p.icon as \"pocket_icon?\"\n            FROM transactions t\n            LEFT JOIN categories c ON t.category_id = c.id\n            LEFT JOIN pockets p ON t.pocket_id = p.id\n            WHERE t.user_id = $3 \n              AND t.deleted_at IS NULL\n              AND ($1::timestamptz IS NULL OR t.occurred_at >= $1)\n              AND ($2::timestamptz IS NULL OR t.occurred_at <= $2)\n              AND ($4::uuid IS NULL OR t.pocket_id = $4)\n              AND ($5::text IS NULL OR t.description ILIKE $5)\n              AND ($6::int[] IS NULL OR t.category_id = ANY($6))\n            ORDER BY t.occurred_at DESC\n            LIMIT $7 OFFSET $8\n            ",
   "describe": {
     "columns": [
       {
@@ -76,6 +76,7 @@
         "Uuid",
         "Uuid",
         "Text",
+        "Int4Array",
         "Int8",
         "Int8"
       ]
@@ -96,5 +97,5 @@
       true
     ]
   },
-  "hash": "7e15dcdc722878b9abf5f6bc5e87be23cf63f339e553a1ff9120b5966fe5c017"
+  "hash": "36d62c8c36040e60e83de769d7a4d5f4078c4da793a0bcbfe3749c374ad539f3"
 }
