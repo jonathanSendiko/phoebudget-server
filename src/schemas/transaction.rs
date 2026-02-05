@@ -35,8 +35,8 @@ pub struct TransactionQueryParams {
     pub start_date: Option<DateTime<Utc>>,
     pub end_date: Option<DateTime<Utc>>,
     pub pocket_id: Option<Uuid>,
-    pub search: Option<String>,
     pub category_id: Option<i32>,
+    pub search: Option<String>,
     #[serde(default, deserialize_with = "deserialize_csv_i32_opt")]
     pub category_ids: Option<Vec<i32>>,
     #[serde(default = "default_page")]

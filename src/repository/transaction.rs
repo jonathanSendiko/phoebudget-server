@@ -17,6 +17,23 @@ struct TransactionPocketRow {
     pocket_icon: Option<String>,
 }
 
+#[derive(sqlx::FromRow)]
+struct TransactionListRow {
+    id: Uuid,
+    amount: Decimal,
+    description: Option<String>,
+    category_id: Option<i32>,
+    occurred_at: DateTime<Utc>,
+    created_at: Option<DateTime<Utc>>,
+    category_name: Option<String>,
+    category_icon: Option<String>,
+    category_is_income: bool,
+    category_exclude: bool,
+    pocket_id: Option<Uuid>,
+    pocket_name: Option<String>,
+    pocket_icon: Option<String>,
+}
+
 impl TransactionRepository {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
@@ -107,6 +124,7 @@ impl TransactionRepository {
         start_date: Option<DateTime<Utc>>,
         end_date: Option<DateTime<Utc>>,
         pocket_id: Option<Uuid>,
+        category_id: Option<i32>,
         search: Option<String>,
         category_ids: Option<Vec<i32>>,
         limit: i64,
@@ -117,35 +135,37 @@ impl TransactionRepository {
         let category_ids = category_ids.filter(|ids| !ids.is_empty());
         let category_ids = category_ids.as_ref().map(|ids| ids.as_slice());
 
-        let transactions = sqlx::query!(
+        let transactions = sqlx::query_as::<_, TransactionListRow>(
             r#"
             SELECT 
                 t.id, t.amount, t.description, t.category_id, t.occurred_at, t.created_at,
-                c.name as "category_name?", c.icon as category_icon, COALESCE(c.is_income, FALSE) as "category_is_income!",
-                COALESCE(c.exclude_from_analysis, FALSE) as "category_exclude!",
-                p.id as "pocket_id?", p.name as "pocket_name?", p.icon as "pocket_icon?"
+                c.name as category_name, c.icon as category_icon, COALESCE(c.is_income, FALSE) as category_is_income,
+                COALESCE(c.exclude_from_analysis, FALSE) as category_exclude,
+                p.id as pocket_id, p.name as pocket_name, p.icon as pocket_icon
             FROM transactions t
             LEFT JOIN categories c ON t.category_id = c.id
             LEFT JOIN pockets p ON t.pocket_id = p.id
-            WHERE t.user_id = $3 
+            WHERE t.user_id = $3
               AND t.deleted_at IS NULL
               AND ($1::timestamptz IS NULL OR t.occurred_at >= $1)
               AND ($2::timestamptz IS NULL OR t.occurred_at <= $2)
               AND ($4::uuid IS NULL OR t.pocket_id = $4)
-              AND ($5::text IS NULL OR t.description ILIKE $5)
+              AND ($5::int4 IS NULL OR t.category_id = $5)
               AND ($6::int[] IS NULL OR t.category_id = ANY($6))
+              AND ($7::text IS NULL OR t.description ILIKE $7)
             ORDER BY t.occurred_at DESC
-            LIMIT $7 OFFSET $8
-            "#,
-            start_date,
-            end_date,
-            user_id,
-            pocket_id,
-            search_pattern,
-            category_ids,
-            limit,
-            offset
+            LIMIT $8 OFFSET $9
+            "#
         )
+        .bind(start_date)
+        .bind(end_date)
+        .bind(user_id)
+        .bind(pocket_id)
+        .bind(category_id)
+        .bind(category_ids)
+        .bind(search_pattern)
+        .bind(limit)
+        .bind(offset)
         .fetch_all(&self.pool)
         .await?
         .into_iter()
@@ -181,6 +201,7 @@ impl TransactionRepository {
         start_date: Option<DateTime<Utc>>,
         end_date: Option<DateTime<Utc>>,
         pocket_id: Option<Uuid>,
+        category_id: Option<i32>,
         search: Option<String>,
         category_ids: Option<Vec<i32>>,
     ) -> Result<i64, AppError> {
@@ -189,29 +210,31 @@ impl TransactionRepository {
         let category_ids = category_ids.filter(|ids| !ids.is_empty());
         let category_ids = category_ids.as_ref().map(|ids| ids.as_slice());
 
-        let result = sqlx::query!(
+        let count = sqlx::query_scalar::<_, i64>(
             r#"
-            SELECT COUNT(*) as "count!"
+            SELECT COUNT(*)::bigint
             FROM transactions t
             WHERE t.user_id = $3 
               AND t.deleted_at IS NULL
               AND ($1::timestamptz IS NULL OR t.occurred_at >= $1)
               AND ($2::timestamptz IS NULL OR t.occurred_at <= $2)
               AND ($4::uuid IS NULL OR t.pocket_id = $4)
-              AND ($5::text IS NULL OR t.description ILIKE $5)
+              AND ($5::int4 IS NULL OR t.category_id = $5)
               AND ($6::int[] IS NULL OR t.category_id = ANY($6))
+              AND ($7::text IS NULL OR t.description ILIKE $7)
             "#,
-            start_date,
-            end_date,
-            user_id,
-            pocket_id,
-            search_pattern,
-            category_ids
         )
+        .bind(start_date)
+        .bind(end_date)
+        .bind(user_id)
+        .bind(pocket_id)
+        .bind(category_id)
+        .bind(category_ids)
+        .bind(search_pattern)
         .fetch_one(&self.pool)
         .await?;
 
-        Ok(result.count)
+        Ok(count)
     }
 
     pub async fn get_transaction(
