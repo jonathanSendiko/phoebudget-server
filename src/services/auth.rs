@@ -265,10 +265,6 @@ struct GoogleJwk {
     kty: String,
     n: String,
     e: String,
-    #[serde(default)]
-    alg: Option<String>,
-    #[serde(rename = "use", default)]
-    use_: Option<String>,
 }
 
 #[derive(Clone)]
