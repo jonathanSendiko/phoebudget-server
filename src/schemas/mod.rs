@@ -9,7 +9,10 @@ pub mod transaction;
 pub mod user;
 pub mod user_subscription;
 
-pub use auth::{AuthResponse, LoginRequest, RefreshTokenRequest, RefreshTokenRow, RegisterRequest};
+pub use auth::{
+    AuthResponse, LoginRequest, OAuthLoginRequest, RefreshTokenRequest, RefreshTokenRow,
+    RegisterRequest, UserIdentityRow,
+};
 pub use finance::{FinancialHealth, UpdateCurrency};
 pub use goal::{
     CreateGoal, CreateGoalEntry, GoalDetail, GoalEntry, GoalId, GoalSummary, UpdateGoal,

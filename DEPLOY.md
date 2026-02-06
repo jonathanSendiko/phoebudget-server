@@ -26,6 +26,7 @@ LETSENCRYPT_EMAIL=admin@yourdomain.com
 
 # Auth Secrets
 JWT_SECRET=super_secret_jwt_key_please_change
+GOOGLE_CLIENT_ID=your_google_web_client_id
 
 # Postgres Credentials (CHANGE THESE!)
 POSTGRES_USER=postgres

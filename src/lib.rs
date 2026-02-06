@@ -33,8 +33,10 @@ impl AppState {
             repository::PocketRepository::new(self.db.clone()),
             repository::RefreshTokenRepository::new(self.db.clone()),
             repository::SubscriptionRepository::new(self.db.clone()),
+            repository::UserIdentityRepository::new(self.db.clone()),
             services::DefaultPasswordHasher,
             services::DefaultTokenIssuer,
+            services::GoogleIdTokenVerifier::new(self.http_client.clone()),
         )
     }
 

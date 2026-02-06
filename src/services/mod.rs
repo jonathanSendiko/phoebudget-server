@@ -8,7 +8,8 @@ pub mod user_subscription;
 
 pub use auth::{
     AuthPocketRepo, AuthRefreshTokenRepo, AuthService, AuthServiceImpl, AuthSettingsRepo,
-    AuthSubscriptionRepo, AuthUserRepo, DefaultPasswordHasher, DefaultTokenIssuer, PasswordHasher,
+    AuthSubscriptionRepo, AuthUserIdentityRepo, AuthUserRepo, DefaultPasswordHasher,
+    DefaultTokenIssuer, GoogleIdTokenVerifier, OAuthClaims, OAuthIdTokenVerifier, PasswordHasher,
     TokenIssuer,
 };
 pub use finance::FinanceService;

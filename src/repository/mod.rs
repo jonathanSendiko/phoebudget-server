@@ -7,6 +7,7 @@ pub mod settings;
 pub mod subscription;
 pub mod transaction;
 pub mod user;
+pub mod user_identity;
 pub mod user_subscription;
 
 pub use goal::GoalRepository;
@@ -18,4 +19,5 @@ pub use settings::SettingsRepository;
 pub use subscription::SubscriptionRepository;
 pub use transaction::TransactionRepository;
 pub use user::UserRepository;
+pub use user_identity::UserIdentityRepository;
 pub use user_subscription::UserSubscriptionRepository;

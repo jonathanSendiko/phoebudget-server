@@ -121,6 +121,7 @@ async fn main() {
     let api_routes = Router::new()
         .route("/auth/register", post(handlers::auth::register))
         .route("/auth/login", post(handlers::auth::login))
+        .route("/auth/oauth", post(handlers::auth::oauth_login))
         .route("/auth/refresh", post(handlers::auth::refresh_token))
         .route(
             "/transactions",

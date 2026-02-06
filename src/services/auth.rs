@@ -1,15 +1,22 @@
 use async_trait::async_trait;
 use chrono::Utc;
+use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
+use std::time::{Duration, Instant};
+use std::sync::OnceLock;
+use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use crate::auth::{Claims, get_keys, hash_password, verify_password};
 use crate::error::AppError;
 use crate::repository::{
     PocketRepository, RefreshTokenRepository, SettingsRepository, SubscriptionRepository,
-    UserRepository,
+    UserIdentityRepository, UserRepository,
 };
-use crate::schemas::{AuthResponse, LoginRequest, RegisterRequest, UserProfile};
+use crate::schemas::{
+    AuthResponse, LoginRequest, OAuthLoginRequest, RegisterRequest, UserIdentityRow, UserProfile,
+};
 
 use jsonwebtoken::{Header, encode};
 
@@ -23,7 +30,9 @@ pub trait AuthUserRepo: Send + Sync {
         email: &str,
         password_hash: &str,
     ) -> Result<Uuid, AppError>;
+    async fn create_oauth(&self, username: &str, email: &str) -> Result<Uuid, AppError>;
     async fn get_profile(&self, user_id: Uuid) -> Result<UserProfile, AppError>;
+    async fn username_exists(&self, username: &str) -> Result<bool, AppError>;
 }
 
 #[async_trait]
@@ -56,6 +65,40 @@ pub trait AuthRefreshTokenRepo: Send + Sync {
 #[async_trait]
 pub trait AuthSubscriptionRepo: Send + Sync {
     async fn create_default(&self, user_id: Uuid) -> Result<Uuid, AppError>;
+}
+
+#[async_trait]
+pub trait AuthUserIdentityRepo: Send + Sync {
+    async fn find_by_provider_subject(
+        &self,
+        provider: &str,
+        provider_subject: &str,
+    ) -> Result<Option<UserIdentityRow>, AppError>;
+    async fn create_identity(
+        &self,
+        user_id: Uuid,
+        provider: &str,
+        provider_subject: &str,
+        email: Option<&str>,
+        email_verified: Option<bool>,
+        name: Option<&str>,
+        picture_url: Option<&str>,
+    ) -> Result<Uuid, AppError>;
+}
+
+#[derive(Debug, Clone)]
+pub struct OAuthClaims {
+    pub provider: String,
+    pub subject: String,
+    pub email: Option<String>,
+    pub email_verified: Option<bool>,
+    pub name: Option<String>,
+    pub picture_url: Option<String>,
+}
+
+#[async_trait]
+pub trait OAuthIdTokenVerifier: Send + Sync {
+    async fn verify(&self, id_token: &str, audience: &str) -> Result<OAuthClaims, AppError>;
 }
 
 pub trait PasswordHasher: Send + Sync {
@@ -94,8 +137,16 @@ impl AuthUserRepo for UserRepository {
         self.create(username, email, password_hash).await
     }
 
+    async fn create_oauth(&self, username: &str, email: &str) -> Result<Uuid, AppError> {
+        self.create_oauth(username, email).await
+    }
+
     async fn get_profile(&self, user_id: Uuid) -> Result<UserProfile, AppError> {
         self.get_profile(user_id).await
+    }
+
+    async fn username_exists(&self, username: &str) -> Result<bool, AppError> {
+        self.username_exists(username).await
     }
 }
 
@@ -151,6 +202,39 @@ impl AuthSubscriptionRepo for SubscriptionRepository {
     }
 }
 
+#[async_trait]
+impl AuthUserIdentityRepo for UserIdentityRepository {
+    async fn find_by_provider_subject(
+        &self,
+        provider: &str,
+        provider_subject: &str,
+    ) -> Result<Option<UserIdentityRow>, AppError> {
+        self.find_by_provider_subject(provider, provider_subject).await
+    }
+
+    async fn create_identity(
+        &self,
+        user_id: Uuid,
+        provider: &str,
+        provider_subject: &str,
+        email: Option<&str>,
+        email_verified: Option<bool>,
+        name: Option<&str>,
+        picture_url: Option<&str>,
+    ) -> Result<Uuid, AppError> {
+        self.create_identity(
+            user_id,
+            provider,
+            provider_subject,
+            email,
+            email_verified,
+            name,
+            picture_url,
+        )
+        .await
+    }
+}
+
 pub trait TokenIssuer: Send + Sync {
     fn generate(&self, user_id: Uuid) -> Result<String, AppError>;
 }
@@ -170,36 +254,217 @@ impl TokenIssuer for DefaultTokenIssuer {
     }
 }
 
+#[derive(Deserialize, Clone)]
+struct GoogleJwks {
+    keys: Vec<GoogleJwk>,
+}
+
+#[derive(Deserialize, Clone)]
+struct GoogleJwk {
+    kid: String,
+    kty: String,
+    n: String,
+    e: String,
+    #[serde(default)]
+    alg: Option<String>,
+    #[serde(rename = "use", default)]
+    use_: Option<String>,
+}
+
+#[derive(Clone)]
+struct GoogleJwksCache {
+    fetched_at: Instant,
+    jwks: GoogleJwks,
+}
+
+impl Default for GoogleJwksCache {
+    fn default() -> Self {
+        Self {
+            fetched_at: Instant::now() - Duration::from_secs(7200),
+            jwks: GoogleJwks { keys: Vec::new() },
+        }
+    }
+}
+
+static GOOGLE_JWKS_CACHE: OnceLock<RwLock<GoogleJwksCache>> = OnceLock::new();
+
+fn google_jwks_cache() -> &'static RwLock<GoogleJwksCache> {
+    GOOGLE_JWKS_CACHE.get_or_init(|| RwLock::new(GoogleJwksCache::default()))
+}
+
+pub struct GoogleIdTokenVerifier {
+    http_client: reqwest::Client,
+    jwks_ttl: Duration,
+}
+
+impl GoogleIdTokenVerifier {
+    pub fn new(http_client: reqwest::Client) -> Self {
+        Self {
+            http_client,
+            jwks_ttl: Duration::from_secs(3600),
+        }
+    }
+
+    async fn get_jwks(&self) -> Result<GoogleJwks, AppError> {
+        {
+            let cache = google_jwks_cache().read().await;
+            if !cache.jwks.keys.is_empty() && cache.fetched_at.elapsed() < self.jwks_ttl {
+                return Ok(cache.jwks.clone());
+            }
+        }
+
+        let mut cache = google_jwks_cache().write().await;
+        if !cache.jwks.keys.is_empty() && cache.fetched_at.elapsed() < self.jwks_ttl {
+            return Ok(cache.jwks.clone());
+        }
+
+        let response = self
+            .http_client
+            .get("https://www.googleapis.com/oauth2/v3/certs")
+            .send()
+            .await
+            .map_err(|_| AppError::InternalServerError("Failed to fetch Google JWKS".to_string()))?
+            .error_for_status()
+            .map_err(|_| AppError::InternalServerError("Failed to fetch Google JWKS".to_string()))?;
+
+        let jwks: GoogleJwks = response
+            .json()
+            .await
+            .map_err(|_| AppError::InternalServerError("Failed to parse Google JWKS".to_string()))?;
+
+        cache.fetched_at = Instant::now();
+        cache.jwks = jwks.clone();
+        Ok(jwks)
+    }
+}
+
+#[derive(Deserialize)]
+struct GoogleIdTokenClaims {
+    sub: String,
+    email: Option<String>,
+    email_verified: Option<bool>,
+    name: Option<String>,
+    picture: Option<String>,
+    aud: serde_json::Value,
+    azp: Option<String>,
+    iss: Option<String>,
+}
+
+#[async_trait]
+impl OAuthIdTokenVerifier for GoogleIdTokenVerifier {
+    async fn verify(&self, id_token: &str, audience: &str) -> Result<OAuthClaims, AppError> {
+        let header = decode_header(id_token)
+            .map_err(|_| AppError::AuthError("Invalid OAuth token header".to_string()))?;
+
+        if header.alg != Algorithm::RS256 {
+            return Err(AppError::AuthError("Invalid OAuth token algorithm".to_string()));
+        }
+
+        let kid = header
+            .kid
+            .ok_or(AppError::AuthError("Missing OAuth token key id".to_string()))?;
+
+        let jwks = self.get_jwks().await?;
+        let jwk = jwks
+            .keys
+            .iter()
+            .find(|key| key.kid == kid)
+            .ok_or(AppError::AuthError("Unknown OAuth token key".to_string()))?;
+
+        if jwk.kty != "RSA" {
+            return Err(AppError::AuthError("Invalid OAuth token key type".to_string()));
+        }
+
+        let decoding_key = DecodingKey::from_rsa_components(&jwk.n, &jwk.e)
+            .map_err(|_| AppError::AuthError("Invalid OAuth token key".to_string()))?;
+
+        let mut validation = Validation::new(Algorithm::RS256);
+        validation.validate_exp = true;
+        validation.validate_aud = false;
+
+        let token_data = decode::<GoogleIdTokenClaims>(id_token, &decoding_key, &validation)
+            .map_err(|_| AppError::AuthError("Invalid OAuth token".to_string()))?;
+
+        let issuer_ok = matches!(
+            token_data.claims.iss.as_deref(),
+            Some("accounts.google.com") | Some("https://accounts.google.com")
+        );
+        if !issuer_ok {
+            return Err(AppError::AuthError("Invalid OAuth token issuer".to_string()));
+        }
+
+        if !audience_matches(&token_data.claims.aud, audience, token_data.claims.azp.as_deref()) {
+            return Err(AppError::AuthError("Invalid OAuth token audience".to_string()));
+        }
+
+        Ok(OAuthClaims {
+            provider: "google".to_string(),
+            subject: token_data.claims.sub,
+            email: token_data.claims.email,
+            email_verified: token_data.claims.email_verified,
+            name: token_data.claims.name,
+            picture_url: token_data.claims.picture,
+        })
+    }
+}
+
+fn audience_matches(aud: &serde_json::Value, audience: &str, azp: Option<&str>) -> bool {
+    match aud {
+        serde_json::Value::String(value) => value == audience,
+        serde_json::Value::Array(values) => {
+            let has_aud = values
+                .iter()
+                .filter_map(|v| v.as_str())
+                .any(|v| v == audience);
+            if !has_aud {
+                return false;
+            }
+            if let Some(azp_value) = azp {
+                azp_value == audience
+            } else {
+                true
+            }
+        }
+        _ => false,
+    }
+}
+
 pub type AuthServiceImpl = AuthService<
     UserRepository,
     SettingsRepository,
     PocketRepository,
     RefreshTokenRepository,
     SubscriptionRepository,
+    UserIdentityRepository,
     DefaultPasswordHasher,
     DefaultTokenIssuer,
+    GoogleIdTokenVerifier,
 >;
 
-pub struct AuthService<URepo, SRepo, PRepo, RRepo, SubRepo, Hasher, Issuer> {
+pub struct AuthService<URepo, SRepo, PRepo, RRepo, SubRepo, IRepo, Hasher, Issuer, Verifier> {
     user_repo: URepo,
     settings_repo: SRepo,
     pocket_repo: PRepo,
     refresh_token_repo: RRepo,
     subscription_repo: SubRepo,
+    identity_repo: IRepo,
     password_hasher: Hasher,
     token_issuer: Issuer,
+    oauth_verifier: Verifier,
 }
 
-impl<URepo, SRepo, PRepo, RRepo, SubRepo, Hasher, Issuer>
-    AuthService<URepo, SRepo, PRepo, RRepo, SubRepo, Hasher, Issuer>
+impl<URepo, SRepo, PRepo, RRepo, SubRepo, IRepo, Hasher, Issuer, Verifier>
+    AuthService<URepo, SRepo, PRepo, RRepo, SubRepo, IRepo, Hasher, Issuer, Verifier>
 where
     URepo: AuthUserRepo,
     SRepo: AuthSettingsRepo,
     PRepo: AuthPocketRepo,
     RRepo: AuthRefreshTokenRepo,
     SubRepo: AuthSubscriptionRepo,
+    IRepo: AuthUserIdentityRepo,
     Hasher: PasswordHasher,
     Issuer: TokenIssuer,
+    Verifier: OAuthIdTokenVerifier,
 {
     pub fn new(
         user_repo: URepo,
@@ -207,8 +472,10 @@ where
         pocket_repo: PRepo,
         refresh_token_repo: RRepo,
         subscription_repo: SubRepo,
+        identity_repo: IRepo,
         password_hasher: Hasher,
         token_issuer: Issuer,
+        oauth_verifier: Verifier,
     ) -> Self {
         Self {
             user_repo,
@@ -216,8 +483,10 @@ where
             pocket_repo,
             refresh_token_repo,
             subscription_repo,
+            identity_repo,
             password_hasher,
             token_issuer,
+            oauth_verifier,
         }
     }
 
@@ -276,15 +545,119 @@ where
             .await?
             .ok_or(AppError::AuthError("Invalid credentials".to_string()))?;
 
+        let password_hash = user.password_hash.as_deref().ok_or(AppError::AuthError(
+            "Password login not enabled for this account".to_string(),
+        ))?;
+
         if !self
             .password_hasher
-            .verify(&req.password, &user.password_hash)?
+            .verify(&req.password, password_hash)?
         {
             return Err(AppError::AuthError("Invalid credentials".to_string()));
         }
 
         let (token, refresh_token) = self.generate_tokens(user.id).await?;
 
+        Ok(AuthResponse {
+            token,
+            refresh_token,
+            message: "Login successful".to_string(),
+        })
+    }
+
+    pub async fn oauth_login(&self, req: OAuthLoginRequest) -> Result<AuthResponse, AppError> {
+        let provider = req.provider.to_lowercase();
+        if provider != "google" {
+            return Err(AppError::ValidationError("Unsupported OAuth provider".to_string()));
+        }
+
+        let client_id = std::env::var("GOOGLE_CLIENT_ID").map_err(|_| {
+            AppError::InternalServerError("GOOGLE_CLIENT_ID must be set".to_string())
+        })?;
+
+        let claims = self.oauth_verifier.verify(&req.id_token, &client_id).await?;
+        let email = claims.email.ok_or(AppError::AuthError(
+            "OAuth account missing email".to_string(),
+        ))?;
+        if !claims.email_verified.unwrap_or(false) {
+            return Err(AppError::AuthError(
+                "OAuth email not verified".to_string(),
+            ));
+        }
+
+        if let Some(identity) = self
+            .identity_repo
+            .find_by_provider_subject(&provider, &claims.subject)
+            .await?
+        {
+            let (token, refresh_token) = self.generate_tokens(identity.user_id).await?;
+            return Ok(AuthResponse {
+                token,
+                refresh_token,
+                message: "Login successful".to_string(),
+            });
+        }
+
+        if let Some(user) = self.user_repo.find_by_email(&email).await? {
+            self.identity_repo
+                .create_identity(
+                    user.id,
+                    &provider,
+                    &claims.subject,
+                    Some(&email),
+                    claims.email_verified,
+                    claims.name.as_deref(),
+                    claims.picture_url.as_deref(),
+                )
+                .await?;
+
+            let (token, refresh_token) = self.generate_tokens(user.id).await?;
+            return Ok(AuthResponse {
+                token,
+                refresh_token,
+                message: "Login successful".to_string(),
+            });
+        }
+
+        let username = match req.username {
+            Some(username) => {
+                if self.user_repo.username_exists(&username).await? {
+                    return Err(AppError::ValidationError(
+                        "Username already taken".to_string(),
+                    ));
+                }
+                username
+            }
+            None => self.generate_username(&email).await?,
+        };
+
+        let base_currency = req.base_currency.unwrap_or_else(|| "SGD".to_string());
+        if !self.settings_repo.validate_currency(&base_currency).await? {
+            return Err(AppError::ValidationError(format!(
+                "Invalid currency code: {}",
+                base_currency
+            )));
+        }
+
+        let user_id = self.user_repo.create_oauth(&username, &email).await?;
+        self.settings_repo
+            .set_base_currency(user_id, &base_currency)
+            .await?;
+        self.pocket_repo.create_default_for_user(user_id).await?;
+        self.subscription_repo.create_default(user_id).await?;
+        self.identity_repo
+            .create_identity(
+                user_id,
+                &provider,
+                &claims.subject,
+                Some(&email),
+                claims.email_verified,
+                claims.name.as_deref(),
+                claims.picture_url.as_deref(),
+            )
+            .await?;
+
+        let (token, refresh_token) = self.generate_tokens(user_id).await?;
         Ok(AuthResponse {
             token,
             refresh_token,
@@ -371,6 +744,39 @@ where
         Ok((access_token, refresh_token))
     }
 
+    async fn generate_username(&self, email: &str) -> Result<String, AppError> {
+        let local = email.split('@').next().unwrap_or("user");
+        let mut base = local
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() {
+                    c.to_ascii_lowercase()
+                } else {
+                    '_'
+                }
+            })
+            .collect::<String>();
+        base = base.trim_matches('_').to_string();
+        if base.is_empty() {
+            base = "user".to_string();
+        }
+
+        if !self.user_repo.username_exists(&base).await? {
+            return Ok(base);
+        }
+
+        for suffix in 1..100 {
+            let candidate = format!("{}{}", base, suffix);
+            if !self.user_repo.username_exists(&candidate).await? {
+                return Ok(candidate);
+            }
+        }
+
+        Err(AppError::InternalServerError(
+            "Unable to generate username".to_string(),
+        ))
+    }
+
     pub async fn get_profile(&self, user_id: Uuid) -> Result<UserProfile, AppError> {
         self.user_repo.get_profile(user_id).await
     }
@@ -380,10 +786,11 @@ where
 mod tests {
     use super::{
         AuthPocketRepo, AuthRefreshTokenRepo, AuthService, AuthSettingsRepo, AuthSubscriptionRepo,
-        AuthUserRepo, PasswordHasher, TokenIssuer,
+        AuthUserIdentityRepo, AuthUserRepo, OAuthClaims, OAuthIdTokenVerifier, PasswordHasher,
+        TokenIssuer,
     };
     use crate::error::AppError;
-    use crate::schemas::{LoginRequest, RefreshTokenRow, RegisterRequest, User};
+    use crate::schemas::{LoginRequest, OAuthLoginRequest, RefreshTokenRow, RegisterRequest, User};
     use async_trait::async_trait;
     use chrono::{DateTime, Utc};
     use sha2::{Digest, Sha256};
@@ -439,6 +846,12 @@ mod tests {
             Ok(Uuid::new_v4())
         }
 
+        async fn create_oauth(&self, username: &str, email: &str) -> Result<Uuid, AppError> {
+            let mut state = self.state.lock().unwrap();
+            state.created_user = Some((username.to_string(), email.to_string(), String::new()));
+            Ok(Uuid::new_v4())
+        }
+
         async fn get_profile(
             &self,
             _user_id: Uuid,
@@ -446,6 +859,14 @@ mod tests {
             let mut state = self.state.lock().unwrap();
             state.profile_calls += 1;
             Err(AppError::InternalServerError("not used".to_string()))
+        }
+
+        async fn username_exists(&self, username: &str) -> Result<bool, AppError> {
+            let state = self.state.lock().unwrap();
+            if let Some((created_username, _, _)) = &state.created_user {
+                return Ok(created_username == username);
+            }
+            Ok(false)
         }
     }
 
@@ -492,6 +913,58 @@ mod tests {
     impl AuthSubscriptionRepo for MockSubscriptionRepo {
         async fn create_default(&self, user_id: Uuid) -> Result<Uuid, AppError> {
             self.calls.lock().unwrap().push(user_id);
+            Ok(Uuid::new_v4())
+        }
+    }
+
+    #[derive(Clone, Default)]
+    struct MockIdentityRepo {
+        state: Arc<Mutex<MockIdentityState>>,
+    }
+
+    struct MockIdentityState {
+        by_provider_subject: HashMap<(String, String), crate::schemas::UserIdentityRow>,
+        created: Vec<(Uuid, String, String)>,
+    }
+
+    impl Default for MockIdentityState {
+        fn default() -> Self {
+            Self {
+                by_provider_subject: HashMap::new(),
+                created: Vec::new(),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl AuthUserIdentityRepo for MockIdentityRepo {
+        async fn find_by_provider_subject(
+            &self,
+            provider: &str,
+            provider_subject: &str,
+        ) -> Result<Option<crate::schemas::UserIdentityRow>, AppError> {
+            let state = self.state.lock().unwrap();
+            Ok(state
+                .by_provider_subject
+                .get(&(provider.to_string(), provider_subject.to_string()))
+                .cloned())
+        }
+
+        async fn create_identity(
+            &self,
+            user_id: Uuid,
+            provider: &str,
+            provider_subject: &str,
+            _email: Option<&str>,
+            _email_verified: Option<bool>,
+            _name: Option<&str>,
+            _picture_url: Option<&str>,
+        ) -> Result<Uuid, AppError> {
+            self.state.lock().unwrap().created.push((
+                user_id,
+                provider.to_string(),
+                provider_subject.to_string(),
+            ));
             Ok(Uuid::new_v4())
         }
     }
@@ -600,22 +1073,38 @@ mod tests {
         }
     }
 
+    #[derive(Clone)]
+    struct MockOauthVerifier {
+        claims: OAuthClaims,
+    }
+
+    #[async_trait]
+    impl OAuthIdTokenVerifier for MockOauthVerifier {
+        async fn verify(&self, _id_token: &str, _audience: &str) -> Result<OAuthClaims, AppError> {
+            Ok(self.claims.clone())
+        }
+    }
+
     fn make_service(
         user_repo: MockUserRepo,
         settings_repo: MockSettingsRepo,
         pocket_repo: MockPocketRepo,
         refresh_token_repo: MockRefreshTokenRepo,
         subscription_repo: MockSubscriptionRepo,
+        identity_repo: MockIdentityRepo,
         hasher: MockPasswordHasher,
         issuer: MockTokenIssuer,
+        verifier: MockOauthVerifier,
     ) -> AuthService<
         MockUserRepo,
         MockSettingsRepo,
         MockPocketRepo,
         MockRefreshTokenRepo,
         MockSubscriptionRepo,
+        MockIdentityRepo,
         MockPasswordHasher,
         MockTokenIssuer,
+        MockOauthVerifier,
     > {
         AuthService::new(
             user_repo,
@@ -623,8 +1112,10 @@ mod tests {
             pocket_repo,
             refresh_token_repo,
             subscription_repo,
+            identity_repo,
             hasher,
             issuer,
+            verifier,
         )
     }
 
@@ -633,8 +1124,21 @@ mod tests {
             id: Uuid::new_v4(),
             username: "alice".to_string(),
             email: "alice@example.com".to_string(),
-            password_hash: "hashed".to_string(),
+            password_hash: Some("hashed".to_string()),
             created_at: None,
+        }
+    }
+
+    fn default_oauth_verifier() -> MockOauthVerifier {
+        MockOauthVerifier {
+            claims: OAuthClaims {
+                provider: "google".to_string(),
+                subject: "subject-1".to_string(),
+                email: Some("alice@example.com".to_string()),
+                email_verified: Some(true),
+                name: Some("Alice".to_string()),
+                picture_url: None,
+            },
         }
     }
 
@@ -656,6 +1160,7 @@ mod tests {
             MockPocketRepo::default(),
             MockRefreshTokenRepo::default(),
             MockSubscriptionRepo::default(),
+            MockIdentityRepo::default(),
             MockPasswordHasher {
                 hash_value: "hash".to_string(),
                 verify_ok: true,
@@ -663,6 +1168,7 @@ mod tests {
             MockTokenIssuer {
                 token: "token".to_string(),
             },
+            default_oauth_verifier(),
         );
 
         let req = RegisterRequest {
@@ -691,6 +1197,7 @@ mod tests {
             MockPocketRepo::default(),
             MockRefreshTokenRepo::default(),
             MockSubscriptionRepo::default(),
+            MockIdentityRepo::default(),
             MockPasswordHasher {
                 hash_value: "hash".to_string(),
                 verify_ok: true,
@@ -698,6 +1205,7 @@ mod tests {
             MockTokenIssuer {
                 token: "token".to_string(),
             },
+            default_oauth_verifier(),
         );
 
         let req = RegisterRequest {
@@ -723,6 +1231,7 @@ mod tests {
         let pocket_repo = MockPocketRepo::default();
         let refresh_repo = MockRefreshTokenRepo::default();
         let subscription_repo = MockSubscriptionRepo::default();
+        let identity_repo = MockIdentityRepo::default();
         let hasher = MockPasswordHasher {
             hash_value: "hashed-pass".to_string(),
             verify_ok: true,
@@ -733,10 +1242,12 @@ mod tests {
             pocket_repo.clone(),
             refresh_repo.clone(),
             subscription_repo.clone(),
+            identity_repo.clone(),
             hasher,
             MockTokenIssuer {
                 token: "token".to_string(),
             },
+            default_oauth_verifier(),
         );
 
         let req = RegisterRequest {
@@ -775,6 +1286,7 @@ mod tests {
             MockPocketRepo::default(),
             MockRefreshTokenRepo::default(),
             MockSubscriptionRepo::default(),
+            MockIdentityRepo::default(),
             MockPasswordHasher {
                 hash_value: "hash".to_string(),
                 verify_ok: true,
@@ -782,6 +1294,7 @@ mod tests {
             MockTokenIssuer {
                 token: "token".to_string(),
             },
+            default_oauth_verifier(),
         );
 
         let req = LoginRequest {
@@ -810,6 +1323,7 @@ mod tests {
             MockPocketRepo::default(),
             MockRefreshTokenRepo::default(),
             MockSubscriptionRepo::default(),
+            MockIdentityRepo::default(),
             MockPasswordHasher {
                 hash_value: "hash".to_string(),
                 verify_ok: false,
@@ -817,6 +1331,7 @@ mod tests {
             MockTokenIssuer {
                 token: "token".to_string(),
             },
+            default_oauth_verifier(),
         );
 
         let req = LoginRequest {
@@ -846,6 +1361,7 @@ mod tests {
             MockPocketRepo::default(),
             refresh_repo.clone(),
             MockSubscriptionRepo::default(),
+            MockIdentityRepo::default(),
             MockPasswordHasher {
                 hash_value: "hash".to_string(),
                 verify_ok: true,
@@ -853,6 +1369,7 @@ mod tests {
             MockTokenIssuer {
                 token: "token".to_string(),
             },
+            default_oauth_verifier(),
         );
 
         let req = LoginRequest {
@@ -867,6 +1384,231 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn oauth_login_rejects_invalid_provider() {
+        unsafe { std::env::set_var("GOOGLE_CLIENT_ID", "client-id") };
+        let service = make_service(
+            MockUserRepo::default(),
+            MockSettingsRepo {
+                valid_currency: true,
+                set_calls: Arc::new(Mutex::new(Vec::new())),
+            },
+            MockPocketRepo::default(),
+            MockRefreshTokenRepo::default(),
+            MockSubscriptionRepo::default(),
+            MockIdentityRepo::default(),
+            MockPasswordHasher {
+                hash_value: "hash".to_string(),
+                verify_ok: true,
+            },
+            MockTokenIssuer {
+                token: "token".to_string(),
+            },
+            default_oauth_verifier(),
+        );
+
+        let req = OAuthLoginRequest {
+            provider: "github".to_string(),
+            id_token: "token".to_string(),
+            username: None,
+            base_currency: None,
+        };
+
+        let err = service.oauth_login(req).await.unwrap_err();
+        assert!(
+            matches!(err, AppError::ValidationError(msg) if msg == "Unsupported OAuth provider")
+        );
+    }
+
+    #[tokio::test]
+    async fn oauth_login_rejects_unverified_email() {
+        unsafe { std::env::set_var("GOOGLE_CLIENT_ID", "client-id") };
+        let verifier = MockOauthVerifier {
+            claims: OAuthClaims {
+                provider: "google".to_string(),
+                subject: "subject-1".to_string(),
+                email: Some("alice@example.com".to_string()),
+                email_verified: Some(false),
+                name: None,
+                picture_url: None,
+            },
+        };
+        let service = make_service(
+            MockUserRepo::default(),
+            MockSettingsRepo {
+                valid_currency: true,
+                set_calls: Arc::new(Mutex::new(Vec::new())),
+            },
+            MockPocketRepo::default(),
+            MockRefreshTokenRepo::default(),
+            MockSubscriptionRepo::default(),
+            MockIdentityRepo::default(),
+            MockPasswordHasher {
+                hash_value: "hash".to_string(),
+                verify_ok: true,
+            },
+            MockTokenIssuer {
+                token: "token".to_string(),
+            },
+            verifier,
+        );
+
+        let req = OAuthLoginRequest {
+            provider: "google".to_string(),
+            id_token: "token".to_string(),
+            username: None,
+            base_currency: None,
+        };
+
+        let err = service.oauth_login(req).await.unwrap_err();
+        assert!(
+            matches!(err, AppError::AuthError(msg) if msg == "OAuth email not verified")
+        );
+    }
+
+    #[tokio::test]
+    async fn oauth_login_returns_tokens_for_existing_identity() {
+        unsafe { std::env::set_var("GOOGLE_CLIENT_ID", "client-id") };
+        let identity_repo = MockIdentityRepo::default();
+        let identity = crate::schemas::UserIdentityRow {
+            id: Uuid::new_v4(),
+            user_id: Uuid::new_v4(),
+            provider: "google".to_string(),
+            provider_subject: "subject-1".to_string(),
+            email: Some("alice@example.com".to_string()),
+            email_verified: Some(true),
+            name: None,
+            picture_url: None,
+            created_at: None,
+            updated_at: None,
+        };
+        identity_repo.state.lock().unwrap().by_provider_subject.insert(
+            ("google".to_string(), "subject-1".to_string()),
+            identity.clone(),
+        );
+
+        let service = make_service(
+            MockUserRepo::default(),
+            MockSettingsRepo {
+                valid_currency: true,
+                set_calls: Arc::new(Mutex::new(Vec::new())),
+            },
+            MockPocketRepo::default(),
+            MockRefreshTokenRepo::default(),
+            MockSubscriptionRepo::default(),
+            identity_repo,
+            MockPasswordHasher {
+                hash_value: "hash".to_string(),
+                verify_ok: true,
+            },
+            MockTokenIssuer {
+                token: "token".to_string(),
+            },
+            default_oauth_verifier(),
+        );
+
+        let req = OAuthLoginRequest {
+            provider: "google".to_string(),
+            id_token: "token".to_string(),
+            username: None,
+            base_currency: None,
+        };
+
+        let resp = service.oauth_login(req).await.unwrap();
+        assert_eq!(resp.message, "Login successful");
+        assert!(!resp.token.is_empty());
+        assert!(!resp.refresh_token.is_empty());
+    }
+
+    #[tokio::test]
+    async fn oauth_login_links_existing_user_by_email() {
+        unsafe { std::env::set_var("GOOGLE_CLIENT_ID", "client-id") };
+        let user_repo = MockUserRepo {
+            state: Arc::new(Mutex::new(MockUserState {
+                user: Some(sample_user()),
+                ..Default::default()
+            })),
+        };
+        let identity_repo = MockIdentityRepo::default();
+        let service = make_service(
+            user_repo,
+            MockSettingsRepo {
+                valid_currency: true,
+                set_calls: Arc::new(Mutex::new(Vec::new())),
+            },
+            MockPocketRepo::default(),
+            MockRefreshTokenRepo::default(),
+            MockSubscriptionRepo::default(),
+            identity_repo.clone(),
+            MockPasswordHasher {
+                hash_value: "hash".to_string(),
+                verify_ok: true,
+            },
+            MockTokenIssuer {
+                token: "token".to_string(),
+            },
+            default_oauth_verifier(),
+        );
+
+        let req = OAuthLoginRequest {
+            provider: "google".to_string(),
+            id_token: "token".to_string(),
+            username: None,
+            base_currency: None,
+        };
+
+        let resp = service.oauth_login(req).await.unwrap();
+        assert_eq!(resp.message, "Login successful");
+        assert_eq!(identity_repo.state.lock().unwrap().created.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn oauth_login_creates_new_user() {
+        unsafe { std::env::set_var("GOOGLE_CLIENT_ID", "client-id") };
+        let user_repo = MockUserRepo::default();
+        let settings_repo = MockSettingsRepo {
+            valid_currency: true,
+            set_calls: Arc::new(Mutex::new(Vec::new())),
+        };
+        let pocket_repo = MockPocketRepo::default();
+        let refresh_repo = MockRefreshTokenRepo::default();
+        let subscription_repo = MockSubscriptionRepo::default();
+        let identity_repo = MockIdentityRepo::default();
+
+        let service = make_service(
+            user_repo.clone(),
+            settings_repo.clone(),
+            pocket_repo.clone(),
+            refresh_repo.clone(),
+            subscription_repo.clone(),
+            identity_repo.clone(),
+            MockPasswordHasher {
+                hash_value: "hash".to_string(),
+                verify_ok: true,
+            },
+            MockTokenIssuer {
+                token: "token".to_string(),
+            },
+            default_oauth_verifier(),
+        );
+
+        let req = OAuthLoginRequest {
+            provider: "google".to_string(),
+            id_token: "token".to_string(),
+            username: None,
+            base_currency: Some("USD".to_string()),
+        };
+
+        let resp = service.oauth_login(req).await.unwrap();
+        assert_eq!(resp.message, "Login successful");
+        assert!(user_repo.state.lock().unwrap().created_user.is_some());
+        assert_eq!(pocket_repo.calls.lock().unwrap().len(), 1);
+        assert_eq!(subscription_repo.calls.lock().unwrap().len(), 1);
+        assert_eq!(settings_repo.set_calls.lock().unwrap().len(), 1);
+        assert_eq!(identity_repo.state.lock().unwrap().created.len(), 1);
+        assert_eq!(refresh_repo.state.lock().unwrap().created.len(), 1);
+    }
+
+    #[tokio::test]
     async fn refresh_access_rejects_invalid_token() {
         let service = make_service(
             MockUserRepo::default(),
@@ -877,6 +1619,7 @@ mod tests {
             MockPocketRepo::default(),
             MockRefreshTokenRepo::default(),
             MockSubscriptionRepo::default(),
+            MockIdentityRepo::default(),
             MockPasswordHasher {
                 hash_value: "hash".to_string(),
                 verify_ok: true,
@@ -884,6 +1627,7 @@ mod tests {
             MockTokenIssuer {
                 token: "token".to_string(),
             },
+            default_oauth_verifier(),
         );
 
         let err = service.refresh_access("bad").await.unwrap_err();
@@ -921,6 +1665,7 @@ mod tests {
             MockPocketRepo::default(),
             refresh_repo,
             MockSubscriptionRepo::default(),
+            MockIdentityRepo::default(),
             MockPasswordHasher {
                 hash_value: "hash".to_string(),
                 verify_ok: true,
@@ -928,6 +1673,7 @@ mod tests {
             MockTokenIssuer {
                 token: "token".to_string(),
             },
+            default_oauth_verifier(),
         );
 
         let err = service.refresh_access(token).await.unwrap_err();
@@ -966,6 +1712,7 @@ mod tests {
             MockPocketRepo::default(),
             refresh_repo.clone(),
             MockSubscriptionRepo::default(),
+            MockIdentityRepo::default(),
             MockPasswordHasher {
                 hash_value: "hash".to_string(),
                 verify_ok: true,
@@ -973,6 +1720,7 @@ mod tests {
             MockTokenIssuer {
                 token: "token".to_string(),
             },
+            default_oauth_verifier(),
         );
 
         let err = service.refresh_access(token).await.unwrap_err();
@@ -1013,6 +1761,7 @@ mod tests {
             MockPocketRepo::default(),
             refresh_repo,
             MockSubscriptionRepo::default(),
+            MockIdentityRepo::default(),
             MockPasswordHasher {
                 hash_value: "hash".to_string(),
                 verify_ok: true,
@@ -1020,6 +1769,7 @@ mod tests {
             MockTokenIssuer {
                 token: "token".to_string(),
             },
+            default_oauth_verifier(),
         );
 
         let err = service.refresh_access(token).await.unwrap_err();
@@ -1057,6 +1807,7 @@ mod tests {
             MockPocketRepo::default(),
             refresh_repo.clone(),
             MockSubscriptionRepo::default(),
+            MockIdentityRepo::default(),
             MockPasswordHasher {
                 hash_value: "hash".to_string(),
                 verify_ok: true,
@@ -1064,6 +1815,7 @@ mod tests {
             MockTokenIssuer {
                 token: "token".to_string(),
             },
+            default_oauth_verifier(),
         );
 
         let resp = service.refresh_access(token).await.unwrap();

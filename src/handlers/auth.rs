@@ -5,8 +5,8 @@ use crate::auth::UserId;
 use crate::error::AppError;
 use crate::response::ApiResponse;
 use crate::schemas::{
-    AuthResponse, LoginRequest, RefreshTokenRequest, RegisterRequest, SubscriptionResponse,
-    UserProfile,
+    AuthResponse, LoginRequest, OAuthLoginRequest, RefreshTokenRequest, RegisterRequest,
+    SubscriptionResponse, UserProfile,
 };
 
 pub async fn register(
@@ -33,6 +33,14 @@ pub async fn refresh_token(
         .auth_service()
         .refresh_access(&payload.refresh_token)
         .await?;
+    Ok(Json(ApiResponse::success(response, None)))
+}
+
+pub async fn oauth_login(
+    State(state): State<AppState>,
+    Json(payload): Json<OAuthLoginRequest>,
+) -> Result<Json<ApiResponse<AuthResponse>>, AppError> {
+    let response = state.auth_service().oauth_login(payload).await?;
     Ok(Json(ApiResponse::success(response, None)))
 }
 
