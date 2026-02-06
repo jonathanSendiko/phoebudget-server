@@ -28,10 +28,13 @@ services:
       - DB_PORT=5432
       - DB_NAME=phoebudget
       - JWT_SECRET=MY_SECRETTT
-      - RUST_LOG=debug
+      - RUST_LOG=info
+      - LOG_REQUEST_BODY=1
+      - LOG_REQUEST_BODY_LEVEL=info
       - REDIS_URL=redis://redis:6379
       - ITICK_API_KEY=${ITICK_API_KEY}
       - RUN_MIGRATIONS=0
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
 
   migrate:
     build: .

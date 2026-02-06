@@ -123,7 +123,14 @@ where
     };
 
     if let Ok(body_str) = std::str::from_utf8(&bytes) {
-        tracing::debug!("{} body = {:?}", direction, body_str);
+        let level = std::env::var("LOG_REQUEST_BODY_LEVEL")
+            .unwrap_or_else(|_| "debug".to_string())
+            .to_lowercase();
+        if level == "info" {
+            tracing::info!("{} body = {:?}", direction, body_str);
+        } else {
+            tracing::debug!("{} body = {:?}", direction, body_str);
+        }
     }
 
     Ok(bytes)
