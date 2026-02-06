@@ -30,12 +30,31 @@ services:
       - DB_PORT=5432
       - DB_NAME=${POSTGRES_DB}
       - JWT_SECRET=${JWT_SECRET}
-      - RUST_LOG=tower_http=info,debug
+      - RUST_LOG=phoebudget=info,tower_http=info
       - REDIS_URL=redis://redis:6379
       - ITICK_API_KEY=${ITICK_API_KEY}
+      - RUN_MIGRATIONS=0
       # Binding to 0.0.0.0 is important inside the container
       - HOST=0.0.0.0
       - PORT=3000
+    networks:
+      - app_network
+
+  migrate:
+    image: phoebudget-server-api
+    build: .
+    depends_on:
+      - db
+    command: "./server"
+    environment:
+      - DB_USERNAME=${POSTGRES_USER}
+      - DB_PASSWORD=${POSTGRES_PASSWORD}
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=${POSTGRES_DB}
+      - REDIS_URL=redis://redis:6379
+      - RUN_MIGRATIONS=1
+      - RUN_MIGRATIONS_ONLY=1
     networks:
       - app_network
 

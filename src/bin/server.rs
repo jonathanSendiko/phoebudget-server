@@ -36,7 +36,10 @@ async fn main() {
         "postgres://{}:{}@{}:{}/{}",
         db_user, db_password, db_host, db_port, db_name
     );
-    println!("Connecting to DB: {}", database_url);
+    println!(
+        "Connecting to DB at host={} db={}",
+        db_host, db_name
+    );
 
     let pool = PgPoolOptions::new()
         .max_connections(5)
@@ -44,11 +47,24 @@ async fn main() {
         .await
         .expect("Failed to connect to database");
 
-    println!("Running database migrations...");
-    sqlx::migrate!()
-        .run(&pool)
-        .await
-        .expect("Failed to migrate database");
+    let run_migrations = std::env::var("RUN_MIGRATIONS")
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+        .unwrap_or(true);
+    if run_migrations {
+        println!("Running database migrations...");
+        sqlx::migrate!()
+            .run(&pool)
+            .await
+            .expect("Failed to migrate database");
+
+        let migrations_only = std::env::var("RUN_MIGRATIONS_ONLY")
+            .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        if migrations_only {
+            println!("Migrations completed; exiting because RUN_MIGRATIONS_ONLY is set.");
+            return;
+        }
+    }
 
     // Initialize Redis
     let redis_client = redis::Client::open(redis_url).expect("Invalid Redis URL");
@@ -63,6 +79,8 @@ async fn main() {
 
     let http_client = reqwest::Client::builder()
         .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        .connect_timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(15))
         .build()
         .expect("Failed to build HTTP client");
 
@@ -192,12 +210,18 @@ async fn main() {
         )
         .layer(GovernorLayer::new(governor_conf));
 
-    let app = Router::new()
+    let mut app = Router::new()
         .route("/", get(handlers::health::health_check))
         .nest("/api/v1", api_routes)
         .layer(TraceLayer::new_for_http())
-        .layer(middleware::from_fn(print_request_response))
         .with_state(state);
+
+    if std::env::var("LOG_REQUEST_BODY")
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+    {
+        app = app.layer(middleware::from_fn(print_request_response));
+    }
 
     let port = std::env::var("PORT").unwrap_or_else(|_| "3000".to_string());
     let port = port.parse::<u16>().expect("Invalid PORT");
