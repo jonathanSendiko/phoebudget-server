@@ -165,6 +165,7 @@ async fn main() {
         )
         .route("/auth/profile", get(handlers::auth::get_profile))
         .route("/auth/subscription", get(handlers::auth::get_subscription))
+        .route("/auth/nuke", delete(handlers::auth::nuke_user_data))
         .route(
             "/portfolio",
             post(handlers::finance::add_investment).get(handlers::finance::get_portfolio),

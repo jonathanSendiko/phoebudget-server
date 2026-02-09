@@ -73,6 +73,10 @@ impl AppState {
         services::SubscriptionService::new(repository::SubscriptionRepository::new(self.db.clone()))
     }
 
+    pub fn data_deletion_service(&self) -> services::DataDeletionService {
+        services::DataDeletionService::new(repository::DataDeletionRepository::new(self.db.clone()))
+    }
+
     pub fn goal_service(&self) -> services::GoalServiceImpl {
         services::GoalService::new(
             repository::GoalRepository::new(self.db.clone()),

@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod data_deletion;
 pub mod finance;
 pub mod goal;
 pub mod pocket;
@@ -12,6 +13,7 @@ pub use auth::{
     DefaultTokenIssuer, GoogleIdTokenVerifier, OAuthClaims, OAuthIdTokenVerifier, PasswordHasher,
     TokenIssuer,
 };
+pub use data_deletion::DataDeletionService;
 pub use finance::FinanceService;
 pub use finance::{
     ExchangeRateProvider as FinanceExchangeRateProvider, FinancePortfolioRepo, FinanceServiceImpl,

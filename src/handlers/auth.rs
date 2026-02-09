@@ -62,3 +62,14 @@ pub async fn get_subscription(
         .await?;
     Ok(Json(ApiResponse::success(subscription, None)))
 }
+
+pub async fn nuke_user_data(
+    State(state): State<AppState>,
+    user_id: UserId,
+) -> Result<Json<ApiResponse<()>>, AppError> {
+    state.data_deletion_service().nuke_user_data(user_id.0).await?;
+    Ok(Json(ApiResponse::success(
+        (),
+        Some("User data deleted".to_string()),
+    )))
+}
