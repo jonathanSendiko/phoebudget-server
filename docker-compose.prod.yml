@@ -33,6 +33,7 @@ services:
       - RUST_LOG=phoebudget=info,tower_http=info
       - REDIS_URL=redis://redis:6379
       - ITICK_API_KEY=${ITICK_API_KEY}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
       - RUN_MIGRATIONS=0
       # Binding to 0.0.0.0 is important inside the container
       - HOST=0.0.0.0
