@@ -1,5 +1,7 @@
 use serde::Serialize;
 
+use crate::i18n;
+
 #[derive(Serialize)]
 pub struct ApiResponse<T> {
     pub success: bool,
@@ -12,7 +14,7 @@ impl<T> ApiResponse<T> {
         Self {
             success: true,
             data,
-            message,
+            message: message.map(|msg| i18n::localize_message(&msg)),
         }
     }
 }

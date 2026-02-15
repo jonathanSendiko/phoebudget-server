@@ -3,6 +3,7 @@ use axum::{Json, extract::State};
 use crate::AppState;
 use crate::auth::UserId;
 use crate::error::AppError;
+use crate::i18n;
 use crate::response::ApiResponse;
 use crate::schemas::{CreatePortfolioItem, FinancialHealth, UpdateCurrency, UpdateInvestment};
 
@@ -23,7 +24,7 @@ pub async fn refresh_portfolio(
 ) -> Result<Json<ApiResponse<String>>, AppError> {
     let updated_count = state.finance_service().refresh_portfolio(user_id.0).await?;
     Ok(Json(ApiResponse::success(
-        format!("Updated {} assets", updated_count),
+        i18n::localize_message(&format!("Updated {} assets", updated_count)),
         None,
     )))
 }
@@ -39,7 +40,7 @@ pub async fn add_investment(
         .add_investment(user_id.0, payload)
         .await?;
     Ok(Json(ApiResponse::success(
-        format!("Added {} to portfolio", ticker),
+        i18n::localize_message(&format!("Added {} to portfolio", ticker)),
         None,
     )))
 }
@@ -65,7 +66,7 @@ pub async fn update_base_currency(
         .update_base_currency(user_id.0, payload.base_currency)
         .await?;
     Ok(Json(ApiResponse::success(
-        "Base currency updated".to_string(),
+        i18n::localize_message("Base currency updated"),
         None,
     )))
 }
@@ -80,7 +81,7 @@ pub async fn remove_investment(
         .remove_investment(user_id.0, path.0)
         .await?;
     Ok(Json(ApiResponse::success(
-        "Investment removed".to_string(),
+        i18n::localize_message("Investment removed"),
         None,
     )))
 }
@@ -96,7 +97,7 @@ pub async fn update_investment(
         .update_investment(user_id.0, path.0, payload)
         .await?;
     Ok(Json(ApiResponse::success(
-        "Investment updated".to_string(),
+        i18n::localize_message("Investment updated"),
         None,
     )))
 }
