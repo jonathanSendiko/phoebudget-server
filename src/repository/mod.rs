@@ -1,3 +1,4 @@
+pub mod data_deletion;
 pub mod goal;
 pub mod goal_entry;
 pub mod pocket;
@@ -7,8 +8,10 @@ pub mod settings;
 pub mod subscription;
 pub mod transaction;
 pub mod user;
+pub mod user_identity;
 pub mod user_subscription;
 
+pub use data_deletion::DataDeletionRepository;
 pub use goal::GoalRepository;
 pub use goal_entry::GoalEntryRepository;
 pub use pocket::PocketRepository;
@@ -18,4 +21,5 @@ pub use settings::SettingsRepository;
 pub use subscription::SubscriptionRepository;
 pub use transaction::TransactionRepository;
 pub use user::UserRepository;
+pub use user_identity::UserIdentityRepository;
 pub use user_subscription::UserSubscriptionRepository;

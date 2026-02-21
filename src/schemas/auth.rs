@@ -28,6 +28,14 @@ pub struct RefreshTokenRequest {
     pub refresh_token: String,
 }
 
+#[derive(Deserialize, Debug)]
+pub struct OAuthLoginRequest {
+    pub provider: String,
+    pub id_token: String,
+    pub username: Option<String>,
+    pub base_currency: Option<String>,
+}
+
 #[derive(Serialize, Debug, sqlx::FromRow)]
 pub struct RefreshTokenRow {
     pub id: Uuid,
@@ -37,4 +45,18 @@ pub struct RefreshTokenRow {
     pub created_at: Option<DateTime<Utc>>,
     pub replaced_by: Option<String>,
     pub is_revoked: Option<bool>,
+}
+
+#[derive(Serialize, Debug, sqlx::FromRow, Clone)]
+pub struct UserIdentityRow {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub provider: String,
+    pub provider_subject: String,
+    pub email: Option<String>,
+    pub email_verified: Option<bool>,
+    pub name: Option<String>,
+    pub picture_url: Option<String>,
+    pub created_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<DateTime<Utc>>,
 }

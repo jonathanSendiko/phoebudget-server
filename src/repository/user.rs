@@ -52,6 +52,25 @@ impl UserRepository {
         Ok(user_id)
     }
 
+    pub async fn create_oauth(&self, username: &str, email: &str) -> Result<Uuid, AppError> {
+        let user_id = sqlx::query_scalar::<_, Uuid>(
+            "INSERT INTO users (username, email, password_hash) VALUES ($1, $2, NULL) RETURNING id",
+        )
+        .bind(username)
+        .bind(email)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(user_id)
+    }
+
+    pub async fn username_exists(&self, username: &str) -> Result<bool, AppError> {
+        let existing = sqlx::query("SELECT id FROM users WHERE username = $1")
+            .bind(username)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(existing.is_some())
+    }
+
     pub async fn get_profile(&self, user_id: Uuid) -> Result<UserProfile, AppError> {
         let profile = sqlx::query_as!(
             UserProfile,

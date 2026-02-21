@@ -1,5 +1,5 @@
 use phoebudget::repository::UserSubscriptionRepository;
-use redis::Commands;
+use redis::AsyncCommands;
 use sqlx::postgres::PgPoolOptions;
 use std::time::Duration;
 use tokio::time;
@@ -38,7 +38,10 @@ async fn main() {
         .expect("Failed to connect to DB");
 
     let client = redis::Client::open(redis_url).expect("Invalid Redis URL");
-    let mut con = client.get_connection().expect("Failed to connect to Redis");
+    let mut con = client
+        .get_async_connection()
+        .await
+        .expect("Failed to connect to Redis");
 
     let repo = UserSubscriptionRepository::new(pool.clone());
     let mut interval = time::interval(Duration::from_secs(3600));
@@ -56,6 +59,7 @@ async fn main() {
                     for sub in due_subs {
                         let _: () = con
                             .rpush("subscription_jobs", sub.id.to_string())
+                            .await
                             .expect("Redis push failed");
                     }
                     tracing::info!("Jobs pushed to Redis.");

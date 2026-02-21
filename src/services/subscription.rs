@@ -14,6 +14,15 @@ impl SubscriptionService {
     }
 
     pub async fn get_subscription(&self, user_id: Uuid) -> Result<SubscriptionResponse, AppError> {
+        if Self::force_premium_enabled() {
+            return Ok(SubscriptionResponse {
+                plan: "premium".to_string(),
+                status: "active".to_string(),
+                expires_at: None,
+                limits: Self::premium_limits(),
+            });
+        }
+
         let sub = self.subscription_repo.get_by_user(user_id).await?;
         let limits = Self::compute_limits(&sub);
 
@@ -31,19 +40,29 @@ impl SubscriptionService {
         })
     }
 
+    fn force_premium_enabled() -> bool {
+        std::env::var("FORCE_PREMIUM_SUBSCRIPTIONS")
+            .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+            .unwrap_or(false)
+    }
+
+    fn premium_limits() -> SubscriptionLimits {
+        SubscriptionLimits {
+            max_investments: None,
+            max_pockets: None,
+            history_days: None,
+            multi_currency: true,
+            pocket_transfers: true,
+            advanced_analytics: true,
+            data_export: true,
+        }
+    }
+
     pub fn compute_limits(sub: &Option<crate::schemas::SubscriptionRow>) -> SubscriptionLimits {
         let plan = sub.as_ref().map(|s| s.plan.as_str()).unwrap_or("free");
 
         match plan {
-            "premium" | "lifetime" => SubscriptionLimits {
-                max_investments: None,
-                max_pockets: None,
-                history_days: None,
-                multi_currency: true,
-                pocket_transfers: true,
-                advanced_analytics: true,
-                data_export: true,
-            },
+            "premium" | "lifetime" => Self::premium_limits(),
             _ => SubscriptionLimits {
                 max_investments: Some(3),
                 max_pockets: Some(2),
@@ -113,5 +132,23 @@ mod tests {
         assert!(limits.pocket_transfers);
         assert!(limits.advanced_analytics);
         assert!(limits.data_export);
+    }
+
+    #[tokio::test]
+    async fn get_subscription_returns_premium_when_forced() {
+        unsafe { std::env::set_var("FORCE_PREMIUM_SUBSCRIPTIONS", "true") };
+        let service = SubscriptionService::new(crate::repository::SubscriptionRepository::new(
+            sqlx::PgPool::connect_lazy("postgres://postgres:password@127.0.0.1:5433/phoebudget")
+                .unwrap(),
+        ));
+
+        let result = service.get_subscription(Uuid::new_v4()).await.unwrap();
+        assert_eq!(result.plan, "premium");
+        assert_eq!(result.status, "active");
+        assert!(result.expires_at.is_none());
+        assert!(result.limits.max_investments.is_none());
+        assert!(result.limits.multi_currency);
+
+        unsafe { std::env::remove_var("FORCE_PREMIUM_SUBSCRIPTIONS") };
     }
 }

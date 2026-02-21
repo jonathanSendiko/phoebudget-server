@@ -33,8 +33,10 @@ impl AppState {
             repository::PocketRepository::new(self.db.clone()),
             repository::RefreshTokenRepository::new(self.db.clone()),
             repository::SubscriptionRepository::new(self.db.clone()),
+            repository::UserIdentityRepository::new(self.db.clone()),
             services::DefaultPasswordHasher,
             services::DefaultTokenIssuer,
+            services::GoogleIdTokenVerifier::new(self.http_client.clone()),
         )
     }
 
@@ -69,6 +71,10 @@ impl AppState {
 
     pub fn subscription_service(&self) -> services::SubscriptionService {
         services::SubscriptionService::new(repository::SubscriptionRepository::new(self.db.clone()))
+    }
+
+    pub fn data_deletion_service(&self) -> services::DataDeletionService {
+        services::DataDeletionService::new(repository::DataDeletionRepository::new(self.db.clone()))
     }
 
     pub fn goal_service(&self) -> services::GoalServiceImpl {
@@ -121,7 +127,14 @@ where
     };
 
     if let Ok(body_str) = std::str::from_utf8(&bytes) {
-        tracing::debug!("{} body = {:?}", direction, body_str);
+        let level = std::env::var("LOG_REQUEST_BODY_LEVEL")
+            .unwrap_or_else(|_| "debug".to_string())
+            .to_lowercase();
+        if level == "info" {
+            tracing::info!("{} body = {:?}", direction, body_str);
+        } else {
+            tracing::debug!("{} body = {:?}", direction, body_str);
+        }
     }
 
     Ok(bytes)

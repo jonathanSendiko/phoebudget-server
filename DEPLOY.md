@@ -26,6 +26,8 @@ LETSENCRYPT_EMAIL=admin@yourdomain.com
 
 # Auth Secrets
 JWT_SECRET=super_secret_jwt_key_please_change
+GOOGLE_CLIENT_ID=your_google_web_client_id
+FORCE_PREMIUM_SUBSCRIPTIONS=false
 
 # Postgres Credentials (CHANGE THESE!)
 POSTGRES_USER=postgres
@@ -49,6 +51,7 @@ The `setup.sh` script will:
 To update the application after pushing new code (this handles server, scheduler, and worker):
 ```bash
 git pull
+docker compose --env-file .env.prod -f docker-compose.prod.yml run --rm migrate
 docker compose --env-file .env.prod -f docker-compose.prod.yml build
 docker compose --env-file .env.prod -f docker-compose.prod.yml up -d
 ```
@@ -62,6 +65,9 @@ For production with active traffic, use staged restarts:
 ```bash
 # 1. Build images first (no downtime)
 docker compose --env-file .env.prod -f docker-compose.prod.yml build
+
+# 1.1 Run migrations before restarting services
+docker compose --env-file .env.prod -f docker-compose.prod.yml run --rm migrate
 
 # 2. Deploy worker first (least critical)
 docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --no-deps worker

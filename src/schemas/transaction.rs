@@ -28,6 +28,7 @@ pub struct UpdateTransaction {
     pub original_currency: Option<String>,
     pub original_amount: Option<Decimal>,
     pub exchange_rate: Option<Decimal>,
+    pub pocket_id: Option<Uuid>,
 }
 
 #[derive(Deserialize)]

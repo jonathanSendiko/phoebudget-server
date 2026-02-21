@@ -28,9 +28,28 @@ services:
       - DB_PORT=5432
       - DB_NAME=phoebudget
       - JWT_SECRET=MY_SECRETTT
-      - RUST_LOG=debug
+      - RUST_LOG=info
+      - LOG_REQUEST_BODY=1
+      - LOG_REQUEST_BODY_LEVEL=info
       - REDIS_URL=redis://redis:6379
       - ITICK_API_KEY=${ITICK_API_KEY}
+      - RUN_MIGRATIONS=0
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+
+  migrate:
+    build: .
+    depends_on:
+      - db
+    command: ./server
+    environment:
+      - DB_USERNAME=postgres
+      - DB_PASSWORD=password
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=phoebudget
+      - REDIS_URL=redis://redis:6379
+      - RUN_MIGRATIONS=1
+      - RUN_MIGRATIONS_ONLY=1
 
   # Redis Service for Job Queue
   redis:

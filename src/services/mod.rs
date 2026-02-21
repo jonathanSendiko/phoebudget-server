@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod data_deletion;
 pub mod finance;
 pub mod goal;
 pub mod pocket;
@@ -8,9 +9,11 @@ pub mod user_subscription;
 
 pub use auth::{
     AuthPocketRepo, AuthRefreshTokenRepo, AuthService, AuthServiceImpl, AuthSettingsRepo,
-    AuthSubscriptionRepo, AuthUserRepo, DefaultPasswordHasher, DefaultTokenIssuer, PasswordHasher,
+    AuthSubscriptionRepo, AuthUserIdentityRepo, AuthUserRepo, DefaultPasswordHasher,
+    DefaultTokenIssuer, GoogleIdTokenVerifier, OAuthClaims, OAuthIdTokenVerifier, PasswordHasher,
     TokenIssuer,
 };
+pub use data_deletion::DataDeletionService;
 pub use finance::FinanceService;
 pub use finance::{
     ExchangeRateProvider as FinanceExchangeRateProvider, FinancePortfolioRepo, FinanceServiceImpl,

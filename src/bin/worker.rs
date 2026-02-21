@@ -1,6 +1,6 @@
 use phoebudget::repository::{PocketRepository, TransactionRepository, UserSubscriptionRepository};
 use phoebudget::services::UserSubscriptionService;
-use redis::Commands;
+use redis::AsyncCommands;
 use sqlx::postgres::PgPoolOptions;
 use uuid::Uuid;
 
@@ -37,7 +37,10 @@ async fn main() {
         .expect("Failed to connect to DB");
 
     let client = redis::Client::open(redis_url).expect("Invalid Redis URL");
-    let mut con = client.get_connection().expect("Failed to connect to Redis");
+    let mut con = client
+        .get_async_connection()
+        .await
+        .expect("Failed to connect to Redis");
 
     // Initialize Service (Need Repos)
     // We need to implement `get_row_by_id` or similar in repo to make this efficient,
@@ -61,7 +64,8 @@ async fn main() {
     loop {
         // BLPOP: Block until item available. Timeout 0 = infinite.
         // Returns (key, value) tuple.
-        let result: redis::RedisResult<(String, String)> = con.blpop("subscription_jobs", 0.0);
+        let result: redis::RedisResult<(String, String)> =
+            con.blpop("subscription_jobs", 0.0).await;
 
         match result {
             Ok((_key, sub_id_str)) => {
