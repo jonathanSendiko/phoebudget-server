@@ -156,6 +156,10 @@ async fn main() {
             get(handlers::finance::get_financial_health),
         )
         .route(
+            "/analysis/net-worth/history",
+            get(handlers::finance::get_net_worth_history),
+        )
+        .route(
             "/portfolio/refresh",
             post(handlers::finance::refresh_portfolio),
         )

@@ -4,7 +4,9 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::error::AppError;
-use crate::schemas::{Category, CategorySummary, PocketSummary, Transaction, TransactionDetail};
+use crate::schemas::{
+    Category, CategorySummary, MonthlyCashFlowRow, PocketSummary, Transaction, TransactionDetail,
+};
 
 pub struct TransactionRepository {
     pool: PgPool,
@@ -427,6 +429,65 @@ impl TransactionRepository {
         .fetch_one(&self.pool)
         .await?;
         Ok(result.net_cash)
+    }
+
+    pub async fn get_net_cash_before(
+        &self,
+        user_id: Uuid,
+        start_date: DateTime<Utc>,
+    ) -> Result<Decimal, AppError> {
+        let result = sqlx::query!(
+            r#"
+            SELECT 
+                COALESCE(SUM(
+                    CASE WHEN c.is_income THEN t.amount 
+                    ELSE -t.amount 
+                    END
+                ), 0) as "net_cash!"
+            FROM transactions t
+            JOIN categories c ON t.category_id = c.id
+            WHERE t.user_id = $1 
+              AND t.occurred_at < $2
+              AND t.deleted_at IS NULL
+              AND (c.exclude_from_analysis = FALSE OR c.exclude_from_analysis IS NULL)
+            "#,
+            user_id,
+            start_date
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(result.net_cash)
+    }
+
+    pub async fn get_monthly_cash_flow(
+        &self,
+        user_id: Uuid,
+        start_date: DateTime<Utc>,
+        end_date: DateTime<Utc>,
+    ) -> Result<Vec<MonthlyCashFlowRow>, AppError> {
+        let rows = sqlx::query_as!(
+            MonthlyCashFlowRow,
+            r#"
+            SELECT 
+                date_trunc('month', t.occurred_at) as "month!",
+                COALESCE(SUM(CASE WHEN c.is_income THEN t.amount ELSE 0 END), 0) as "total_income!",
+                COALESCE(SUM(CASE WHEN c.is_income THEN 0 ELSE t.amount END), 0) as "total_spent!"
+            FROM transactions t
+            JOIN categories c ON t.category_id = c.id
+            WHERE t.user_id = $3 
+              AND t.occurred_at BETWEEN $1 AND $2
+              AND t.deleted_at IS NULL
+              AND (c.exclude_from_analysis = FALSE OR c.exclude_from_analysis IS NULL)
+            GROUP BY 1
+            ORDER BY 1
+            "#,
+            start_date,
+            end_date,
+            user_id
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
     }
 
     pub async fn get_pocket_balance(

@@ -1,11 +1,16 @@
 use async_trait::async_trait;
+use chrono::{DateTime, Datelike, Months, Utc};
 use rust_decimal::Decimal;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::error::AppError;
 use crate::investments;
 use crate::repository::{PortfolioRepository, SettingsRepository, TransactionRepository};
-use crate::schemas::{Asset, CreatePortfolioItem, FinancialHealth, UpdateInvestment};
+use crate::schemas::{
+    Asset, CreatePortfolioItem, FinancialHealth, MonthlyCashFlowRow, NetWorthHistoryPoint,
+    NetWorthHistoryResponse, UpdateInvestment,
+};
 
 #[async_trait]
 pub trait FinancePortfolioRepo: Send + Sync {
@@ -36,6 +41,17 @@ pub trait FinancePortfolioRepo: Send + Sync {
 #[async_trait]
 pub trait FinanceTransactionRepo: Send + Sync {
     async fn get_net_cash(&self, user_id: Uuid) -> Result<Decimal, AppError>;
+    async fn get_net_cash_before(
+        &self,
+        user_id: Uuid,
+        start_date: DateTime<Utc>,
+    ) -> Result<Decimal, AppError>;
+    async fn get_monthly_cash_flow(
+        &self,
+        user_id: Uuid,
+        start_date: DateTime<Utc>,
+        end_date: DateTime<Utc>,
+    ) -> Result<Vec<MonthlyCashFlowRow>, AppError>;
 }
 
 #[async_trait]
@@ -167,6 +183,24 @@ impl FinanceTransactionRepo for TransactionRepository {
     async fn get_net_cash(&self, user_id: Uuid) -> Result<Decimal, AppError> {
         self.get_net_cash(user_id).await
     }
+
+    async fn get_net_cash_before(
+        &self,
+        user_id: Uuid,
+        start_date: DateTime<Utc>,
+    ) -> Result<Decimal, AppError> {
+        self.get_net_cash_before(user_id, start_date).await
+    }
+
+    async fn get_monthly_cash_flow(
+        &self,
+        user_id: Uuid,
+        start_date: DateTime<Utc>,
+        end_date: DateTime<Utc>,
+    ) -> Result<Vec<MonthlyCashFlowRow>, AppError> {
+        self.get_monthly_cash_flow(user_id, start_date, end_date)
+            .await
+    }
 }
 
 #[async_trait]
@@ -279,6 +313,67 @@ where
             cash_balance: cash,
             investment_balance,
             total_net_worth: net_worth,
+        })
+    }
+
+    pub async fn get_net_worth_history(
+        &self,
+        user_id: Uuid,
+        start_date: DateTime<Utc>,
+        end_date: DateTime<Utc>,
+    ) -> Result<NetWorthHistoryResponse, AppError> {
+        if end_date < start_date {
+            return Err(AppError::ValidationError(
+                "End date cannot be before start date".to_string(),
+            ));
+        }
+
+        let opening_balance = self
+            .transaction_repo
+            .get_net_cash_before(user_id, start_date)
+            .await?;
+        let rows = self
+            .transaction_repo
+            .get_monthly_cash_flow(user_id, start_date, end_date)
+            .await?;
+
+        let mut by_month: HashMap<String, (Decimal, Decimal)> = HashMap::new();
+        for row in rows {
+            let key = format!("{:04}-{:02}", row.month.year(), row.month.month());
+            by_month.insert(key, (row.total_income, row.total_spent));
+        }
+
+        let mut points = Vec::new();
+        let mut running = opening_balance;
+        let mut current = month_start(start_date)?;
+        let end_month = month_start(end_date)?;
+
+        loop {
+            let key = format!("{:04}-{:02}", current.year(), current.month());
+            let (total_income, total_spent) =
+                by_month.get(&key).cloned().unwrap_or((Decimal::ZERO, Decimal::ZERO));
+            let net_change = total_income - total_spent;
+            running += net_change;
+
+            points.push(NetWorthHistoryPoint {
+                month: key,
+                total_income,
+                total_spent,
+                net_change,
+                net_worth_end: running,
+            });
+
+            if current.year() == end_month.year() && current.month() == end_month.month() {
+                break;
+            }
+            current = next_month_start(current)?;
+        }
+
+        Ok(NetWorthHistoryResponse {
+            start_date,
+            end_date,
+            opening_balance,
+            points,
         })
     }
 
@@ -462,6 +557,33 @@ where
     }
 }
 
+fn month_start(date: DateTime<Utc>) -> Result<DateTime<Utc>, AppError> {
+    let naive = date
+        .date_naive()
+        .with_day(1)
+        .and_then(|d| d.and_hms_nano_opt(0, 0, 0, 0))
+        .ok_or_else(|| {
+            AppError::InternalServerError("Failed to compute month start".to_string())
+        })?;
+    Ok(DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc))
+}
+
+fn next_month_start(date: DateTime<Utc>) -> Result<DateTime<Utc>, AppError> {
+    let next_date = date
+        .date_naive()
+        .checked_add_months(Months::new(1))
+        .ok_or_else(|| {
+            AppError::InternalServerError("Failed to compute next month".to_string())
+        })?;
+    let naive = next_date
+        .with_day(1)
+        .and_then(|d| d.and_hms_nano_opt(0, 0, 0, 0))
+        .ok_or_else(|| {
+            AppError::InternalServerError("Failed to compute next month".to_string())
+        })?;
+    Ok(DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -469,8 +591,9 @@ mod tests {
         FinanceTransactionRepo, PriceProvider,
     };
     use crate::error::AppError;
-    use crate::schemas::{Asset, CreatePortfolioItem, PortfolioJoinedRow};
+    use crate::schemas::{Asset, CreatePortfolioItem, MonthlyCashFlowRow, PortfolioJoinedRow};
     use async_trait::async_trait;
+    use chrono::{DateTime, TimeZone, Utc};
     use moka::future::Cache;
     use rust_decimal::Decimal;
     use std::collections::HashMap;
@@ -581,12 +704,31 @@ mod tests {
     #[derive(Clone)]
     struct MockTransactionRepo {
         net_cash: Decimal,
+        net_cash_before: Decimal,
+        monthly_cash_flow: Vec<MonthlyCashFlowRow>,
     }
 
     #[async_trait]
     impl FinanceTransactionRepo for MockTransactionRepo {
         async fn get_net_cash(&self, _user_id: Uuid) -> Result<Decimal, AppError> {
             Ok(self.net_cash)
+        }
+
+        async fn get_net_cash_before(
+            &self,
+            _user_id: Uuid,
+            _start_date: DateTime<Utc>,
+        ) -> Result<Decimal, AppError> {
+            Ok(self.net_cash_before)
+        }
+
+        async fn get_monthly_cash_flow(
+            &self,
+            _user_id: Uuid,
+            _start_date: DateTime<Utc>,
+            _end_date: DateTime<Utc>,
+        ) -> Result<Vec<MonthlyCashFlowRow>, AppError> {
+            Ok(self.monthly_cash_flow.clone())
         }
     }
 
@@ -708,6 +850,23 @@ mod tests {
         }
     }
 
+    fn make_cash_flow_row(
+        year: i32,
+        month: u32,
+        total_income: Decimal,
+        total_spent: Decimal,
+    ) -> MonthlyCashFlowRow {
+        let month_start = Utc
+            .with_ymd_and_hms(year, month, 1, 0, 0, 0)
+            .single()
+            .expect("valid month");
+        MonthlyCashFlowRow {
+            month: month_start,
+            total_income,
+            total_spent,
+        }
+    }
+
     fn clone_joined_row_ref(row: &PortfolioJoinedRow) -> PortfolioJoinedRow {
         PortfolioJoinedRow {
             ticker: row.ticker.clone(),
@@ -734,6 +893,8 @@ mod tests {
         };
         let transaction_repo = MockTransactionRepo {
             net_cash: Decimal::new(100, 0),
+            net_cash_before: Decimal::ZERO,
+            monthly_cash_flow: Vec::new(),
         };
         let settings_repo = MockSettingsRepo {
             base_currency: "USD".to_string(),
@@ -780,6 +941,8 @@ mod tests {
         };
         let transaction_repo = MockTransactionRepo {
             net_cash: Decimal::ZERO,
+            net_cash_before: Decimal::ZERO,
+            monthly_cash_flow: Vec::new(),
         };
         let settings_repo = MockSettingsRepo {
             base_currency: "USD".to_string(),
@@ -818,6 +981,8 @@ mod tests {
         let portfolio_repo = MockPortfolioRepo::default();
         let transaction_repo = MockTransactionRepo {
             net_cash: Decimal::ZERO,
+            net_cash_before: Decimal::ZERO,
+            monthly_cash_flow: Vec::new(),
         };
         let settings_repo = MockSettingsRepo {
             base_currency: "USD".to_string(),
@@ -854,6 +1019,8 @@ mod tests {
         };
         let transaction_repo = MockTransactionRepo {
             net_cash: Decimal::ZERO,
+            net_cash_before: Decimal::ZERO,
+            monthly_cash_flow: Vec::new(),
         };
         let settings_repo = MockSettingsRepo {
             base_currency: "USD".to_string(),
@@ -894,6 +1061,8 @@ mod tests {
         };
         let transaction_repo = MockTransactionRepo {
             net_cash: Decimal::ZERO,
+            net_cash_before: Decimal::ZERO,
+            monthly_cash_flow: Vec::new(),
         };
         let settings_repo = MockSettingsRepo {
             base_currency: "USD".to_string(),
@@ -929,5 +1098,132 @@ mod tests {
         let state = portfolio_repo.state.lock().unwrap();
         assert_eq!(state.asset_calls, 0);
         assert!(state.updated_prices.is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_net_worth_history_builds_monthly_series() {
+        let portfolio_repo = MockPortfolioRepo::default();
+        let transaction_repo = MockTransactionRepo {
+            net_cash: Decimal::ZERO,
+            net_cash_before: Decimal::new(100, 0),
+            monthly_cash_flow: vec![
+                make_cash_flow_row(2025, 1, Decimal::new(50, 0), Decimal::new(20, 0)),
+                make_cash_flow_row(2025, 2, Decimal::new(10, 0), Decimal::new(40, 0)),
+            ],
+        };
+        let settings_repo = MockSettingsRepo {
+            base_currency: "USD".to_string(),
+            validate_ok: true,
+            set_calls: Arc::new(Mutex::new(Vec::new())),
+        };
+        let service = make_finance_service(
+            portfolio_repo,
+            transaction_repo,
+            settings_repo,
+            MockPriceProvider::default(),
+            MockExchangeRateProvider::default(),
+            Cache::new(100),
+            Cache::new(100),
+        );
+
+        let start_date = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).single().unwrap();
+        let end_date = Utc
+            .with_ymd_and_hms(2025, 2, 28, 23, 59, 59)
+            .single()
+            .unwrap();
+
+        let history = service
+            .get_net_worth_history(Uuid::new_v4(), start_date, end_date)
+            .await
+            .unwrap();
+
+        assert_eq!(history.opening_balance, Decimal::new(100, 0));
+        assert_eq!(history.points.len(), 2);
+        assert_eq!(history.points[0].month, "2025-01");
+        assert_eq!(history.points[0].net_worth_end, Decimal::new(130, 0));
+        assert_eq!(history.points[1].month, "2025-02");
+        assert_eq!(history.points[1].net_worth_end, Decimal::new(100, 0));
+    }
+
+    #[tokio::test]
+    async fn get_net_worth_history_fills_missing_months() {
+        let portfolio_repo = MockPortfolioRepo::default();
+        let transaction_repo = MockTransactionRepo {
+            net_cash: Decimal::ZERO,
+            net_cash_before: Decimal::ZERO,
+            monthly_cash_flow: vec![make_cash_flow_row(
+                2025,
+                2,
+                Decimal::new(20, 0),
+                Decimal::new(5, 0),
+            )],
+        };
+        let settings_repo = MockSettingsRepo {
+            base_currency: "USD".to_string(),
+            validate_ok: true,
+            set_calls: Arc::new(Mutex::new(Vec::new())),
+        };
+        let service = make_finance_service(
+            portfolio_repo,
+            transaction_repo,
+            settings_repo,
+            MockPriceProvider::default(),
+            MockExchangeRateProvider::default(),
+            Cache::new(100),
+            Cache::new(100),
+        );
+
+        let start_date = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).single().unwrap();
+        let end_date = Utc
+            .with_ymd_and_hms(2025, 3, 31, 23, 59, 59)
+            .single()
+            .unwrap();
+
+        let history = service
+            .get_net_worth_history(Uuid::new_v4(), start_date, end_date)
+            .await
+            .unwrap();
+
+        assert_eq!(history.points.len(), 3);
+        assert_eq!(history.points[0].month, "2025-01");
+        assert_eq!(history.points[0].net_change, Decimal::ZERO);
+        assert_eq!(history.points[1].month, "2025-02");
+        assert_eq!(history.points[1].net_change, Decimal::new(15, 0));
+        assert_eq!(history.points[2].month, "2025-03");
+        assert_eq!(history.points[2].net_change, Decimal::ZERO);
+    }
+
+    #[tokio::test]
+    async fn get_net_worth_history_rejects_invalid_range() {
+        let portfolio_repo = MockPortfolioRepo::default();
+        let transaction_repo = MockTransactionRepo {
+            net_cash: Decimal::ZERO,
+            net_cash_before: Decimal::ZERO,
+            monthly_cash_flow: Vec::new(),
+        };
+        let settings_repo = MockSettingsRepo {
+            base_currency: "USD".to_string(),
+            validate_ok: true,
+            set_calls: Arc::new(Mutex::new(Vec::new())),
+        };
+        let service = make_finance_service(
+            portfolio_repo,
+            transaction_repo,
+            settings_repo,
+            MockPriceProvider::default(),
+            MockExchangeRateProvider::default(),
+            Cache::new(100),
+            Cache::new(100),
+        );
+
+        let start_date = Utc.with_ymd_and_hms(2025, 3, 1, 0, 0, 0).single().unwrap();
+        let end_date = Utc.with_ymd_and_hms(2025, 2, 1, 0, 0, 0).single().unwrap();
+
+        let err = service
+            .get_net_worth_history(Uuid::new_v4(), start_date, end_date)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, AppError::ValidationError(msg) if msg == "End date cannot be before start date"));
     }
 }

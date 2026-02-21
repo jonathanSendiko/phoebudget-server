@@ -13,7 +13,10 @@ pub use auth::{
     AuthResponse, LoginRequest, OAuthLoginRequest, RefreshTokenRequest, RefreshTokenRow,
     RegisterRequest, UserIdentityRow,
 };
-pub use finance::{FinancialHealth, UpdateCurrency};
+pub use finance::{
+    FinancialHealth, MonthlyCashFlowRow, NetWorthHistoryPoint, NetWorthHistoryResponse,
+    UpdateCurrency,
+};
 pub use goal::{
     CreateGoal, CreateGoalEntry, GoalDetail, GoalEntry, GoalId, GoalSummary, UpdateGoal,
 };

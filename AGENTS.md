@@ -23,6 +23,7 @@
 ## Testing Guidelines
 - Tests live alongside modules (e.g., `src/portfolio/tests.rs`); add new tests close to the code they cover.
 - Prefer unit tests for pure logic and integration tests for repository/DB behavior.
+- Always run `cargo test` after code changes in a session.
 - Run `cargo test` before opening a PR; add tests for new endpoints or migrations.
 
 ## Commit & Pull Request Guidelines
