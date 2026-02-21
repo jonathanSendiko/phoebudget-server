@@ -4,6 +4,7 @@ use uuid::Uuid;
 use crate::AppState;
 use crate::auth::UserId;
 use crate::error::AppError;
+use crate::i18n;
 use crate::response::ApiResponse;
 use crate::schemas::{CreatePocket, Pocket, PocketId, UpdatePocket};
 
@@ -18,7 +19,7 @@ pub async fn create_pocket(
         .await?;
     Ok(Json(ApiResponse::success(
         PocketId { id },
-        Some("Pocket created".to_string()),
+        Some(i18n::localize_message("Pocket created")),
     )))
 }
 
@@ -50,7 +51,7 @@ pub async fn update_pocket(
         .update_pocket(path.0, user_id.0, payload)
         .await?;
     Ok(Json(ApiResponse::success(
-        "Pocket updated".to_string(),
+        i18n::localize_message("Pocket updated"),
         None,
     )))
 }
@@ -65,7 +66,7 @@ pub async fn delete_pocket(
         .delete_pocket(path.0, user_id.0)
         .await?;
     Ok(Json(ApiResponse::success(
-        "Pocket deleted".to_string(),
+        i18n::localize_message("Pocket deleted"),
         None,
     )))
 }

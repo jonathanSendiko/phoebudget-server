@@ -2,7 +2,7 @@ use axum::{
     Router, middleware,
     routing::{delete, get, post, put},
 };
-use phoebudget::{AppState, handlers, print_request_response};
+use phoebudget::{AppState, handlers, i18n, print_request_response};
 use sqlx::postgres::PgPoolOptions;
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -36,10 +36,7 @@ async fn main() {
         "postgres://{}:{}@{}:{}/{}",
         db_user, db_password, db_host, db_port, db_name
     );
-    println!(
-        "Connecting to DB at host={} db={}",
-        db_host, db_name
-    );
+    println!("Connecting to DB at host={} db={}", db_host, db_name);
 
     let pool = PgPoolOptions::new()
         .max_connections(5)
@@ -219,6 +216,7 @@ async fn main() {
     let mut app = Router::new()
         .route("/", get(handlers::health::health_check))
         .nest("/api/v1", api_routes)
+        .layer(middleware::from_fn(i18n::with_request_locale))
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 

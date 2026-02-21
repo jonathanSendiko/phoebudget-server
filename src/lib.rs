@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod error;
 pub mod handlers;
+pub mod i18n;
 pub mod investments;
 pub mod portfolio;
 pub mod repository;

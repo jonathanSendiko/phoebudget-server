@@ -7,6 +7,7 @@ use uuid::Uuid;
 use crate::AppState;
 use crate::auth::UserId;
 use crate::error::AppError;
+use crate::i18n;
 use crate::response::ApiResponse;
 use crate::schemas::{
     Category, CreateTransaction, DateRangeParams, PaginatedTransactions, TransactionDetail,
@@ -24,7 +25,7 @@ pub async fn create_transaction(
         .await?;
     Ok(Json(ApiResponse::success(
         TransactionId { id },
-        Some("Transaction saved".to_string()),
+        Some(i18n::localize_message("Transaction saved")),
     )))
 }
 
@@ -39,7 +40,7 @@ pub async fn update_transaction(
         .update_transaction(path.0, user_id.0, payload)
         .await?;
     Ok(Json(ApiResponse::success(
-        "Transaction updated".to_string(),
+        i18n::localize_message("Transaction updated"),
         None,
     )))
 }
@@ -54,7 +55,7 @@ pub async fn delete_transaction(
         .delete_transaction(path.0, user_id.0)
         .await?;
     Ok(Json(ApiResponse::success(
-        "Transaction deleted".to_string(),
+        i18n::localize_message("Transaction deleted"),
         None,
     )))
 }
@@ -69,7 +70,7 @@ pub async fn restore_transaction(
         .restore_transaction(path.0, user_id.0)
         .await?;
     Ok(Json(ApiResponse::success(
-        "Transaction restored".to_string(),
+        i18n::localize_message("Transaction restored"),
         None,
     )))
 }
@@ -139,7 +140,7 @@ pub async fn transfer_funds(
         .transfer_funds(user_id.0, payload)
         .await?;
     Ok(Json(ApiResponse::success(
-        "Transfer successful".to_string(),
+        i18n::localize_message("Transfer successful"),
         None,
     )))
 }
