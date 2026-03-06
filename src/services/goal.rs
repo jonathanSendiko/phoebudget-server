@@ -31,6 +31,7 @@ pub trait GoalRepo: Send + Sync {
         description: Option<String>,
         target_amount: Option<Decimal>,
         current_amount: Option<Decimal>,
+        pocket_id: Option<Uuid>,
         icon: Option<String>,
     ) -> Result<(), AppError>;
     async fn delete(&self, id: Uuid, user_id: Uuid) -> Result<u64, AppError>;
@@ -97,6 +98,7 @@ impl GoalRepo for GoalRepository {
         description: Option<String>,
         target_amount: Option<Decimal>,
         current_amount: Option<Decimal>,
+        pocket_id: Option<Uuid>,
         icon: Option<String>,
     ) -> Result<(), AppError> {
         self.update(
@@ -106,6 +108,7 @@ impl GoalRepo for GoalRepository {
             description,
             target_amount,
             current_amount,
+            pocket_id,
             icon,
         )
         .await
@@ -224,6 +227,10 @@ where
             }
         }
 
+        if let Some(pocket_id) = req.pocket_id {
+            self.pocket_repo.get_by_id(pocket_id, user_id).await?;
+        }
+
         self.goal_repo
             .update(
                 id,
@@ -232,6 +239,7 @@ where
                 req.description,
                 req.target_amount,
                 req.current_amount,
+                req.pocket_id,
                 req.icon,
             )
             .await
@@ -263,7 +271,16 @@ where
         // 3. Update goal current_amount
         let new_amount = goal.current_amount + req.amount;
         self.goal_repo
-            .update(goal_id, user_id, None, None, None, Some(new_amount), None)
+            .update(
+                goal_id,
+                user_id,
+                None,
+                None,
+                None,
+                Some(new_amount),
+                None,
+                None,
+            )
             .await?;
 
         Ok(entry_id)
@@ -317,6 +334,7 @@ mod tests {
             Option<String>,
             Option<Decimal>,
             Option<Decimal>,
+            Option<Uuid>,
             Option<String>,
         )>,
         delete_result: u64,
@@ -379,6 +397,7 @@ mod tests {
             description: Option<String>,
             target_amount: Option<Decimal>,
             current_amount: Option<Decimal>,
+            pocket_id: Option<Uuid>,
             icon: Option<String>,
         ) -> Result<(), AppError> {
             let mut state = self.state.lock().unwrap();
@@ -389,6 +408,7 @@ mod tests {
                 description,
                 target_amount,
                 current_amount,
+                pocket_id,
                 icon,
             ));
             Ok(())
@@ -593,6 +613,7 @@ mod tests {
             description: None,
             target_amount: Some(Decimal::ZERO),
             current_amount: None,
+            pocket_id: None,
             icon: None,
         };
 
@@ -624,6 +645,42 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, AppError::NotFoundError(msg) if msg == "Goal not found"));
+    }
+
+    #[tokio::test]
+    async fn update_goal_requires_pocket_and_passes_it_to_repo() {
+        let goal_repo = MockGoalRepo::default();
+        let pocket_repo = MockPocketRepo::default();
+        let service = make_service(
+            goal_repo.clone(),
+            MockGoalEntryRepo::default(),
+            pocket_repo.clone(),
+        );
+
+        let goal_id = Uuid::new_v4();
+        let user_id = Uuid::new_v4();
+        let pocket_id = Uuid::new_v4();
+        let req = UpdateGoal {
+            name: Some("Renamed".to_string()),
+            description: None,
+            target_amount: None,
+            current_amount: None,
+            pocket_id: Some(pocket_id),
+            icon: None,
+        };
+
+        service.update_goal(goal_id, user_id, req).await.unwrap();
+
+        let pocket_calls = pocket_repo.calls.lock().unwrap().clone();
+        assert_eq!(pocket_calls, vec![(pocket_id, user_id)]);
+
+        let update_calls = goal_repo.state.lock().unwrap().update_calls.clone();
+        assert_eq!(update_calls.len(), 1);
+        let update = &update_calls[0];
+        assert_eq!(update.0, goal_id);
+        assert_eq!(update.1, user_id);
+        assert_eq!(update.2.as_deref(), Some("Renamed"));
+        assert_eq!(update.6, Some(pocket_id));
     }
 
     #[tokio::test]
@@ -659,6 +716,7 @@ mod tests {
         assert_eq!(update.0, goal_id);
         assert_eq!(update.1, user_id);
         assert_eq!(update.5, Some(Decimal::new(12, 0)));
+        assert_eq!(update.6, None);
     }
 
     #[tokio::test]

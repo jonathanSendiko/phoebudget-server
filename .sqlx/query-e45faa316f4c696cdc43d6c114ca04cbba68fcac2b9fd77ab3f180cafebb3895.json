@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE financial_goals\n            SET \n                name = COALESCE($3, name),\n                description = COALESCE($4, description),\n                target_amount = COALESCE($5, target_amount),\n                current_amount = COALESCE($6, current_amount),\n                pocket_id = COALESCE($7, pocket_id),\n                icon = COALESCE($8, icon),\n                updated_at = NOW()\n            WHERE id = $1 AND user_id = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Varchar",
+        "Text",
+        "Numeric",
+        "Numeric",
+        "Uuid",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e45faa316f4c696cdc43d6c114ca04cbba68fcac2b9fd77ab3f180cafebb3895"
+}

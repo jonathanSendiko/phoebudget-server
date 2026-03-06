@@ -24,6 +24,7 @@ pub struct UpdateGoal {
     pub description: Option<String>,
     pub target_amount: Option<Decimal>,
     pub current_amount: Option<Decimal>,
+    pub pocket_id: Option<Uuid>,
     pub icon: Option<String>,
 }
 
