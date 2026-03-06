@@ -33,7 +33,7 @@ pub trait GoalRepo: Send + Sync {
         current_amount: Option<Decimal>,
         pocket_id: Option<Uuid>,
         icon: Option<String>,
-    ) -> Result<(), AppError>;
+    ) -> Result<u64, AppError>;
     async fn delete(&self, id: Uuid, user_id: Uuid) -> Result<u64, AppError>;
 }
 
@@ -100,7 +100,7 @@ impl GoalRepo for GoalRepository {
         current_amount: Option<Decimal>,
         pocket_id: Option<Uuid>,
         icon: Option<String>,
-    ) -> Result<(), AppError> {
+    ) -> Result<u64, AppError> {
         self.update(
             id,
             user_id,
@@ -231,7 +231,8 @@ where
             self.pocket_repo.get_by_id(pocket_id, user_id).await?;
         }
 
-        self.goal_repo
+        let updated = self
+            .goal_repo
             .update(
                 id,
                 user_id,
@@ -242,7 +243,13 @@ where
                 req.pocket_id,
                 req.icon,
             )
-            .await
+            .await?;
+
+        if updated == 0 {
+            return Err(AppError::NotFoundError("Goal not found".to_string()));
+        }
+
+        Ok(())
     }
 
     pub async fn delete_goal(&self, id: Uuid, user_id: Uuid) -> Result<(), AppError> {
@@ -399,7 +406,7 @@ mod tests {
             current_amount: Option<Decimal>,
             pocket_id: Option<Uuid>,
             icon: Option<String>,
-        ) -> Result<(), AppError> {
+        ) -> Result<u64, AppError> {
             let mut state = self.state.lock().unwrap();
             state.update_calls.push((
                 id,
@@ -411,7 +418,7 @@ mod tests {
                 pocket_id,
                 icon,
             ));
-            Ok(())
+            Ok(state.delete_result)
         }
 
         async fn delete(&self, _id: Uuid, _user_id: Uuid) -> Result<u64, AppError> {
@@ -681,6 +688,39 @@ mod tests {
         assert_eq!(update.1, user_id);
         assert_eq!(update.2.as_deref(), Some("Renamed"));
         assert_eq!(update.6, Some(pocket_id));
+    }
+
+    #[tokio::test]
+    async fn update_goal_returns_not_found_when_repo_updates_nothing() {
+        let goal_repo = MockGoalRepo {
+            state: Arc::new(Mutex::new(MockGoalState {
+                delete_result: 0,
+                ..Default::default()
+            })),
+        };
+        let service = make_service(
+            goal_repo,
+            MockGoalEntryRepo::default(),
+            MockPocketRepo::default(),
+        );
+
+        let err = service
+            .update_goal(
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                UpdateGoal {
+                    name: Some("Renamed".to_string()),
+                    description: None,
+                    target_amount: None,
+                    current_amount: None,
+                    pocket_id: None,
+                    icon: None,
+                },
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, AppError::NotFoundError(msg) if msg == "Goal not found"));
     }
 
     #[tokio::test]

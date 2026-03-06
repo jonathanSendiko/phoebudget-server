@@ -168,8 +168,8 @@ impl GoalRepository {
         current_amount: Option<Decimal>,
         pocket_id: Option<Uuid>,
         icon: Option<String>,
-    ) -> Result<(), AppError> {
-        sqlx::query!(
+    ) -> Result<u64, AppError> {
+        let result = sqlx::query!(
             r#"
             UPDATE financial_goals
             SET 
@@ -193,7 +193,7 @@ impl GoalRepository {
         )
         .execute(&self.pool)
         .await?;
-        Ok(())
+        Ok(result.rows_affected())
     }
 
     pub async fn delete(&self, id: Uuid, user_id: Uuid) -> Result<u64, AppError> {
