@@ -32,6 +32,9 @@ pub async fn fetch_price_with_source(
             fetch_price_itick(client, code, region, api_key).await
         }
         "YAHOO" => fetch_price_yahoo(client, api_ticker).await,
+        "STOOQ" => fetch_price_stooq(client, api_ticker)
+            .await
+            .map(|p| (p, "USD".to_string())),
         "BINANCE" => fetch_price_binance(client, api_ticker)
             .await
             .map(|p| (p, "USD".to_string())), // Assuming USDT
@@ -176,19 +179,94 @@ async fn fetch_price_itick(
     Ok((price, currency.to_string()))
 }
 
+async fn fetch_price_stooq(
+    client: &reqwest::Client,
+    api_ticker: &str,
+) -> Result<Decimal, AppError> {
+    // api_ticker examples: "voo.us", "spy.us", "aapl.us"
+    let symbol = api_ticker.trim().to_lowercase();
+    let url = format!(
+        "https://stooq.com/q/l/?s={}&f=sd2t2ohlcv&h&e=csv",
+        symbol
+    );
+
+    let resp = client
+        .get(&url)
+        .header(
+            reqwest::header::USER_AGENT,
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36",
+        )
+        .send()
+        .await
+        .map_err(|e| AppError::ValidationError(format!("Stooq API connection failed: {}", e)))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(AppError::ValidationError(format!(
+            "Stooq API returned error {}: {}",
+            status, text
+        )));
+    }
+
+    let text = resp
+        .text()
+        .await
+        .map_err(|e| AppError::ValidationError(format!("Failed to read Stooq response: {}", e)))?;
+
+    // CSV format:
+    // Symbol,Date,Time,Open,High,Low,Close,Volume
+    // VOO.US,YYYY-MM-DD,HH:MM:SS,....,Close,Volume
+    let mut lines = text.lines();
+    let _header = lines.next();
+    let row = lines
+        .next()
+        .ok_or_else(|| AppError::ValidationError("No data found on Stooq".to_string()))?;
+
+    let parts: Vec<&str> = row.split(',').collect();
+    if parts.len() < 8 {
+        return Err(AppError::ValidationError(format!(
+            "Unexpected Stooq CSV row: {}",
+            row
+        )));
+    }
+
+    let close_str = parts[6];
+    if close_str == "N/A" || close_str.is_empty() {
+        return Err(AppError::ValidationError(format!(
+            "No Stooq close price for {}",
+            api_ticker
+        )));
+    }
+
+    let close_f: f64 = close_str.parse().map_err(|_| {
+        AppError::ValidationError(format!("Failed to parse Stooq close price: {}", close_str))
+    })?;
+
+    Decimal::from_f64(close_f)
+        .ok_or_else(|| AppError::ValidationError("Failed to parse Stooq price".to_string()))
+}
+
 async fn fetch_price_yahoo(
     client: &reqwest::Client,
     ticker: &str,
 ) -> Result<(Decimal, String), AppError> {
+
     let url = format!(
         "https://query1.finance.yahoo.com/v8/finance/chart/{}?interval=1d&range=1m",
         ticker
     );
 
-    let resp =
-        client.get(&url).send().await.map_err(|e| {
-            AppError::ValidationError(format!("Yahoo API connection failed: {}", e))
-        })?;
+    let resp = client
+        .get(&url)
+        // Yahoo is picky; set a normal UA to avoid occasional 429/blocks.
+        .header(
+            reqwest::header::USER_AGENT,
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36",
+        )
+        .send()
+        .await
+        .map_err(|e| AppError::ValidationError(format!("Yahoo API connection failed: {}", e)))?;
 
     if !resp.status().is_success() {
         let status = resp.status();
@@ -334,10 +412,16 @@ pub async fn fetch_coingecko_icon(
     Ok(Some(data.image.large))
 }
 
-// Internal structs for Frankfurter API response parsing
+// Internal structs for ExchangeRate-API (open.er-api.com) response parsing
+// Response format: {"result":"success","base_code":"USD","rates":{...}}
 #[derive(Deserialize, Debug)]
-struct FrankfurterResponse {
-    rates: std::collections::HashMap<String, f64>,
+struct ErApiResponse {
+    result: Option<String>,
+    #[allow(dead_code)]
+    base_code: Option<String>,
+    rates: Option<std::collections::HashMap<String, f64>>,
+    #[allow(dead_code)]
+    error_type: Option<String>,
 }
 
 pub async fn fetch_exchange_rate(
@@ -345,28 +429,45 @@ pub async fn fetch_exchange_rate(
     from: &str,
     to: &str,
 ) -> Result<Decimal, AppError> {
+    // Support common aliases used by some users/UIs.
+    // Most FX providers use ISO 4217 code TWD (not NTD).
+    let from = if from.eq_ignore_ascii_case("NTD") { "TWD" } else { from };
+    let to = if to.eq_ignore_ascii_case("NTD") { "TWD" } else { to };
+
     if from == to {
         return Ok(Decimal::new(1, 0));
     }
 
-    let url = format!("https://api.frankfurter.app/latest?from={}&to={}", from, to);
+    // ExchangeRate-API supports a wide set of currencies including TWD/IDR/SGD.
+    let url = format!("https://open.er-api.com/v6/latest/{}", from);
 
     let resp = client.get(&url).send().await.map_err(|e| {
-        AppError::ValidationError(format!("Frankfurter API connection failed: {}", e))
+        AppError::ValidationError(format!("FX API connection failed: {}", e))
     })?;
 
     if !resp.status().is_success() {
         return Err(AppError::ValidationError(format!(
-            "Frankfurter API returned error: {}",
+            "FX API returned error: {}",
             resp.status()
         )));
     }
 
-    let data: FrankfurterResponse = resp.json().await.map_err(|e| {
-        AppError::ValidationError(format!("Failed to parse Frankfurter response: {}", e))
+    let data: ErApiResponse = resp.json().await.map_err(|e| {
+        AppError::ValidationError(format!("Failed to parse FX API response: {}", e))
     })?;
 
-    let rate = data.rates.get(to).ok_or_else(|| {
+    if data.result.as_deref() != Some("success") {
+        return Err(AppError::ValidationError(format!(
+            "FX API returned non-success result: {:?} ({:?})",
+            data.result, data.error_type
+        )));
+    }
+
+    let rates = data
+        .rates
+        .ok_or_else(|| AppError::ValidationError("FX API missing rates".to_string()))?;
+
+    let rate = rates.get(to).ok_or_else(|| {
         AppError::ValidationError(format!("No rate found for {} -> {}", from, to))
     })?;
 
