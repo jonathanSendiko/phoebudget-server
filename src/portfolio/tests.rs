@@ -117,7 +117,7 @@ mod investment_summary {
         assert_eq!(summary.total_value_converted, dec!(2430.00)); // 1800 * 1.35
         assert_eq!(summary.change_pct, dec!(20)); // Percentage unchanged
         assert_eq!(summary.absolute_change_pct, dec!(20));
-        assert_eq!(summary.currency, "USD");
+        assert_eq!(summary.currency, "SGD");
         assert_eq!(summary.base_currency, "SGD");
         assert_eq!(summary.asset_currency, "USD");
     }

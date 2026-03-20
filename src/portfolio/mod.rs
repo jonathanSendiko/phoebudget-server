@@ -104,7 +104,7 @@ fn calculate_investment_summary(
         change_pct,
         absolute_change_pct,
         portfolio_pct,
-        currency: asset_currency.clone(),
+        currency: base_currency.to_string(),
         base_currency: base_currency.to_string(),
         asset_currency,
         icon_url: item.icon_url,
