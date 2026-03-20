@@ -50,7 +50,7 @@ pub struct InvestmentSummary {
     #[serde(serialize_with = "round_currency")]
     pub change_pct: Decimal,
     #[serde(serialize_with = "round_currency")]
-    pub absolute_change_pct: Decimal,
+    pub absolute_change: Decimal, // Base
     #[serde(serialize_with = "round_currency")]
     pub portfolio_pct: Decimal, // Percentage of total portfolio
     pub currency: String,       // Base Currency
