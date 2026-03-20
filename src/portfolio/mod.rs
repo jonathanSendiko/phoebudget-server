@@ -89,6 +89,7 @@ fn calculate_investment_summary(
     let total_value_converted = item.quantity * current_price_converted;
 
     let change_pct = calculate_change_percent(current_price_native, item.avg_buy_price);
+    let absolute_change_pct = change_pct.abs();
 
     InvestmentSummary {
         ticker: item.ticker,
@@ -101,8 +102,10 @@ fn calculate_investment_summary(
         total_value: total_value_native,
         total_value_converted,
         change_pct,
+        absolute_change_pct,
         portfolio_pct,
-        currency: base_currency.to_string(),
+        currency: asset_currency.clone(),
+        base_currency: base_currency.to_string(),
         asset_currency,
         icon_url: item.icon_url,
     }
