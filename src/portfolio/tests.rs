@@ -55,8 +55,10 @@ fn make_test_summary(
         } else {
             Decimal::ZERO
         },
+        absolute_change: quantity * (current_price - avg_buy_price),
         portfolio_pct: Decimal::ZERO, // Set separately in response tests
         currency: "USD".to_string(),
+        base_currency: "USD".to_string(),
         asset_currency: asset_currency.to_string(),
         icon_url: None,
     }
@@ -87,7 +89,9 @@ mod investment_summary {
         assert_eq!(summary.total_value, dec!(1800.00));
         assert_eq!(summary.total_value_converted, dec!(1800.00));
         assert_eq!(summary.change_pct, dec!(20)); // (180-150)/150 * 100
+        assert_eq!(summary.absolute_change, dec!(300));
         assert_eq!(summary.currency, "USD");
+        assert_eq!(summary.base_currency, "USD");
         assert_eq!(summary.asset_currency, "USD");
     }
 
@@ -108,7 +112,9 @@ mod investment_summary {
         assert_eq!(summary.total_value, dec!(1800.00));
         assert_eq!(summary.total_value_converted, dec!(2430.00)); // 1800 * 1.35
         assert_eq!(summary.change_pct, dec!(20)); // Percentage unchanged
+        assert_eq!(summary.absolute_change, dec!(405)); // (243 - 202.5) * 10
         assert_eq!(summary.currency, "SGD");
+        assert_eq!(summary.base_currency, "SGD");
         assert_eq!(summary.asset_currency, "USD");
     }
 
@@ -122,6 +128,7 @@ mod investment_summary {
 
         // Then
         assert_eq!(summary.change_pct, dec!(-20));
+        assert_eq!(summary.absolute_change, dec!(-100));
         assert_eq!(summary.total_value, dec!(400.00));
     }
 
@@ -135,6 +142,7 @@ mod investment_summary {
 
         // Then: Should not panic, change_pct should be 0
         assert_eq!(summary.change_pct, Decimal::ZERO);
+        assert_eq!(summary.absolute_change, dec!(1000));
         assert_eq!(summary.total_value, dec!(1000.00));
     }
 
