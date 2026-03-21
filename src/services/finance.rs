@@ -350,8 +350,10 @@ where
 
         loop {
             let key = format!("{:04}-{:02}", current.year(), current.month());
-            let (total_income, total_spent) =
-                by_month.get(&key).cloned().unwrap_or((Decimal::ZERO, Decimal::ZERO));
+            let (total_income, total_spent) = by_month
+                .get(&key)
+                .cloned()
+                .unwrap_or((Decimal::ZERO, Decimal::ZERO));
             let net_change = total_income - total_spent;
             running += net_change;
 
@@ -572,15 +574,11 @@ fn next_month_start(date: DateTime<Utc>) -> Result<DateTime<Utc>, AppError> {
     let next_date = date
         .date_naive()
         .checked_add_months(Months::new(1))
-        .ok_or_else(|| {
-            AppError::InternalServerError("Failed to compute next month".to_string())
-        })?;
+        .ok_or_else(|| AppError::InternalServerError("Failed to compute next month".to_string()))?;
     let naive = next_date
         .with_day(1)
         .and_then(|d| d.and_hms_nano_opt(0, 0, 0, 0))
-        .ok_or_else(|| {
-            AppError::InternalServerError("Failed to compute next month".to_string())
-        })?;
+        .ok_or_else(|| AppError::InternalServerError("Failed to compute next month".to_string()))?;
     Ok(DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc))
 }
 
@@ -1224,6 +1222,8 @@ mod tests {
             .await
             .unwrap_err();
 
-        assert!(matches!(err, AppError::ValidationError(msg) if msg == "End date cannot be before start date"));
+        assert!(
+            matches!(err, AppError::ValidationError(msg) if msg == "End date cannot be before start date")
+        );
     }
 }

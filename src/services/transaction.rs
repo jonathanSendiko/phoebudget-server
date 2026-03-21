@@ -1356,7 +1356,17 @@ mod tests {
         let service = make_transaction_service(tx_repo.clone(), pocket_repo, settings_repo, fx);
 
         let response = service
-            .get_transactions(Uuid::new_v4(), None, None, None, Some(12), None, None, 0, 1000)
+            .get_transactions(
+                Uuid::new_v4(),
+                None,
+                None,
+                None,
+                Some(12),
+                None,
+                None,
+                0,
+                1000,
+            )
             .await
             .unwrap();
         assert_eq!(response.limit, 100);

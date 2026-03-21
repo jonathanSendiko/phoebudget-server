@@ -1,4 +1,4 @@
-use axum::{Json, extract::State, extract::Query};
+use axum::{Json, extract::Query, extract::State};
 
 use crate::AppState;
 use crate::auth::UserId;

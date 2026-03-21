@@ -3,8 +3,8 @@ use chrono::Utc;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
-use std::time::{Duration, Instant};
 use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
@@ -209,7 +209,8 @@ impl AuthUserIdentityRepo for UserIdentityRepository {
         provider: &str,
         provider_subject: &str,
     ) -> Result<Option<UserIdentityRow>, AppError> {
-        self.find_by_provider_subject(provider, provider_subject).await
+        self.find_by_provider_subject(provider, provider_subject)
+            .await
     }
 
     async fn create_identity(
@@ -321,12 +322,13 @@ impl GoogleIdTokenVerifier {
             .await
             .map_err(|_| AppError::InternalServerError("Failed to fetch Google JWKS".to_string()))?
             .error_for_status()
-            .map_err(|_| AppError::InternalServerError("Failed to fetch Google JWKS".to_string()))?;
+            .map_err(|_| {
+                AppError::InternalServerError("Failed to fetch Google JWKS".to_string())
+            })?;
 
-        let jwks: GoogleJwks = response
-            .json()
-            .await
-            .map_err(|_| AppError::InternalServerError("Failed to parse Google JWKS".to_string()))?;
+        let jwks: GoogleJwks = response.json().await.map_err(|_| {
+            AppError::InternalServerError("Failed to parse Google JWKS".to_string())
+        })?;
 
         cache.fetched_at = Instant::now();
         cache.jwks = jwks.clone();
@@ -353,12 +355,14 @@ impl OAuthIdTokenVerifier for GoogleIdTokenVerifier {
             .map_err(|_| AppError::AuthError("Invalid OAuth token header".to_string()))?;
 
         if header.alg != Algorithm::RS256 {
-            return Err(AppError::AuthError("Invalid OAuth token algorithm".to_string()));
+            return Err(AppError::AuthError(
+                "Invalid OAuth token algorithm".to_string(),
+            ));
         }
 
-        let kid = header
-            .kid
-            .ok_or(AppError::AuthError("Missing OAuth token key id".to_string()))?;
+        let kid = header.kid.ok_or(AppError::AuthError(
+            "Missing OAuth token key id".to_string(),
+        ))?;
 
         let jwks = self.get_jwks().await?;
         let jwk = jwks
@@ -368,7 +372,9 @@ impl OAuthIdTokenVerifier for GoogleIdTokenVerifier {
             .ok_or(AppError::AuthError("Unknown OAuth token key".to_string()))?;
 
         if jwk.kty != "RSA" {
-            return Err(AppError::AuthError("Invalid OAuth token key type".to_string()));
+            return Err(AppError::AuthError(
+                "Invalid OAuth token key type".to_string(),
+            ));
         }
 
         let decoding_key = DecodingKey::from_rsa_components(&jwk.n, &jwk.e)
@@ -386,11 +392,19 @@ impl OAuthIdTokenVerifier for GoogleIdTokenVerifier {
             Some("accounts.google.com") | Some("https://accounts.google.com")
         );
         if !issuer_ok {
-            return Err(AppError::AuthError("Invalid OAuth token issuer".to_string()));
+            return Err(AppError::AuthError(
+                "Invalid OAuth token issuer".to_string(),
+            ));
         }
 
-        if !audience_matches(&token_data.claims.aud, audience, token_data.claims.azp.as_deref()) {
-            return Err(AppError::AuthError("Invalid OAuth token audience".to_string()));
+        if !audience_matches(
+            &token_data.claims.aud,
+            audience,
+            token_data.claims.azp.as_deref(),
+        ) {
+            return Err(AppError::AuthError(
+                "Invalid OAuth token audience".to_string(),
+            ));
         }
 
         Ok(OAuthClaims {
@@ -545,10 +559,7 @@ where
             "Password login not enabled for this account".to_string(),
         ))?;
 
-        if !self
-            .password_hasher
-            .verify(&req.password, password_hash)?
-        {
+        if !self.password_hasher.verify(&req.password, password_hash)? {
             return Err(AppError::AuthError("Invalid credentials".to_string()));
         }
 
@@ -564,21 +575,24 @@ where
     pub async fn oauth_login(&self, req: OAuthLoginRequest) -> Result<AuthResponse, AppError> {
         let provider = req.provider.to_lowercase();
         if provider != "google" {
-            return Err(AppError::ValidationError("Unsupported OAuth provider".to_string()));
+            return Err(AppError::ValidationError(
+                "Unsupported OAuth provider".to_string(),
+            ));
         }
 
         let client_id = std::env::var("GOOGLE_CLIENT_ID").map_err(|_| {
             AppError::InternalServerError("GOOGLE_CLIENT_ID must be set".to_string())
         })?;
 
-        let claims = self.oauth_verifier.verify(&req.id_token, &client_id).await?;
+        let claims = self
+            .oauth_verifier
+            .verify(&req.id_token, &client_id)
+            .await?;
         let email = claims.email.ok_or(AppError::AuthError(
             "OAuth account missing email".to_string(),
         ))?;
         if !claims.email_verified.unwrap_or(false) {
-            return Err(AppError::AuthError(
-                "OAuth email not verified".to_string(),
-            ));
+            return Err(AppError::AuthError("OAuth email not verified".to_string()));
         }
 
         if let Some(identity) = self
@@ -1456,9 +1470,7 @@ mod tests {
         };
 
         let err = service.oauth_login(req).await.unwrap_err();
-        assert!(
-            matches!(err, AppError::AuthError(msg) if msg == "OAuth email not verified")
-        );
+        assert!(matches!(err, AppError::AuthError(msg) if msg == "OAuth email not verified"));
     }
 
     #[tokio::test]
@@ -1477,10 +1489,15 @@ mod tests {
             created_at: None,
             updated_at: None,
         };
-        identity_repo.state.lock().unwrap().by_provider_subject.insert(
-            ("google".to_string(), "subject-1".to_string()),
-            identity.clone(),
-        );
+        identity_repo
+            .state
+            .lock()
+            .unwrap()
+            .by_provider_subject
+            .insert(
+                ("google".to_string(), "subject-1".to_string()),
+                identity.clone(),
+            );
 
         let service = make_service(
             MockUserRepo::default(),

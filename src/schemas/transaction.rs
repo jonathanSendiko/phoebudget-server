@@ -88,7 +88,11 @@ where
     let parsed = Option::<CsvOrVec>::deserialize(deserializer)?;
     match parsed {
         None => Ok(None),
-        Some(CsvOrVec::Vec(values)) => Ok(if values.is_empty() { None } else { Some(values) }),
+        Some(CsvOrVec::Vec(values)) => Ok(if values.is_empty() {
+            None
+        } else {
+            Some(values)
+        }),
         Some(CsvOrVec::String(value)) => {
             let trimmed = value.trim();
             if trimmed.is_empty() {
@@ -101,9 +105,7 @@ where
                 if item.is_empty() {
                     continue;
                 }
-                let id = item
-                    .parse::<i32>()
-                    .map_err(serde::de::Error::custom)?;
+                let id = item.parse::<i32>().map_err(serde::de::Error::custom)?;
                 ids.push(id);
             }
 

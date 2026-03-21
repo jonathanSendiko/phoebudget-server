@@ -26,7 +26,13 @@ async fn connect_test_db() -> Option<PgPool> {
     Some(pool)
 }
 
-async fn insert_user_graph(pool: &PgPool, user_id: Uuid, category_id: i32, pocket_id: Uuid, goal_id: Uuid) {
+async fn insert_user_graph(
+    pool: &PgPool,
+    user_id: Uuid,
+    category_id: i32,
+    pocket_id: Uuid,
+    goal_id: Uuid,
+) {
     sqlx::query("INSERT INTO users (id, username, email, password_hash) VALUES ($1, $2, $3, $4)")
         .bind(user_id)
         .bind(format!("nuke_user_{}", user_id))
@@ -42,13 +48,11 @@ async fn insert_user_graph(pool: &PgPool, user_id: Uuid, category_id: i32, pocke
         .await
         .unwrap();
 
-    sqlx::query(
-        "INSERT INTO subscriptions (user_id, plan, status) VALUES ($1, 'free', 'active')",
-    )
-    .bind(user_id)
-    .execute(pool)
-    .await
-    .unwrap();
+    sqlx::query("INSERT INTO subscriptions (user_id, plan, status) VALUES ($1, 'free', 'active')")
+        .bind(user_id)
+        .execute(pool)
+        .await
+        .unwrap();
 
     sqlx::query(
         "INSERT INTO refresh_tokens (user_id, token_hash, expires_at, is_revoked) VALUES ($1, $2, $3, FALSE)",
@@ -89,7 +93,15 @@ async fn insert_user_graph(pool: &PgPool, user_id: Uuid, category_id: i32, pocke
     .await
     .unwrap();
 
-    let ticker = format!("NUKE{}", user_id.to_string().replace('-', "").chars().take(6).collect::<String>());
+    let ticker = format!(
+        "NUKE{}",
+        user_id
+            .to_string()
+            .replace('-', "")
+            .chars()
+            .take(6)
+            .collect::<String>()
+    );
     sqlx::query("INSERT INTO assets (ticker, name, asset_type) VALUES ($1, 'Nuke Asset', 'Stock') ON CONFLICT (ticker) DO NOTHING")
         .bind(&ticker)
         .execute(pool)
