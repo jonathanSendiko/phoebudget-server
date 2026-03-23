@@ -25,7 +25,7 @@ pub async fn create_transaction(
         .await?;
     Ok(Json(ApiResponse::success(
         TransactionId { id },
-        Some(i18n::localize_message("Transaction saved")),
+        Some("Transaction saved".to_string()),
     )))
 }
 

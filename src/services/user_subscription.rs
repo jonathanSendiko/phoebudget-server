@@ -103,7 +103,13 @@ impl UserSubscriptionService {
         &self,
         user_id: Uuid,
     ) -> Result<Vec<crate::schemas::UserSubscriptionSummary>, AppError> {
-        self.sub_repo.get_all(user_id).await
+        Ok(self
+            .sub_repo
+            .get_all(user_id)
+            .await?
+            .into_iter()
+            .map(|sub| sub.localize())
+            .collect())
     }
 
     pub async fn get_subscription(
@@ -111,7 +117,7 @@ impl UserSubscriptionService {
         id: Uuid,
         user_id: Uuid,
     ) -> Result<crate::schemas::UserSubscriptionDetail, AppError> {
-        self.sub_repo.get_by_id(id, user_id).await
+        Ok(self.sub_repo.get_by_id(id, user_id).await?.localize())
     }
 
     pub async fn update_subscription(

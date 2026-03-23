@@ -5,6 +5,7 @@ use axum::http::{
 };
 use axum::middleware::Next;
 use axum::response::Response;
+use std::future::Future;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Locale {
@@ -31,10 +32,60 @@ pub fn current_locale() -> Locale {
         .unwrap_or(Locale::English)
 }
 
+pub async fn run_with_locale<T>(locale: Locale, future: impl Future<Output = T>) -> T {
+    REQUEST_LOCALE.scope(locale, future).await
+}
+
 pub fn localize_message(message: &str) -> String {
     match current_locale() {
         Locale::English => message.to_string(),
         Locale::Indonesian => localize_to_indonesian(message),
+    }
+}
+
+pub fn localize_basis(basis: &str) -> String {
+    match current_locale() {
+        Locale::English => basis.to_string(),
+        Locale::Indonesian => match basis {
+            "monthly" => "bulanan".to_string(),
+            "annually" => "tahunan".to_string(),
+            _ => basis.to_string(),
+        },
+    }
+}
+
+pub fn localize_plan(plan: &str) -> String {
+    match current_locale() {
+        Locale::English => plan.to_string(),
+        Locale::Indonesian => match plan {
+            "free" => "gratis".to_string(),
+            "premium" => "premium".to_string(),
+            "lifetime" => "seumur hidup".to_string(),
+            _ => plan.to_string(),
+        },
+    }
+}
+
+pub fn localize_status(status: &str) -> String {
+    match current_locale() {
+        Locale::English => status.to_string(),
+        Locale::Indonesian => match status {
+            "active" => "aktif".to_string(),
+            "cancelled" => "dibatalkan".to_string(),
+            "expired" => "kedaluwarsa".to_string(),
+            _ => status.to_string(),
+        },
+    }
+}
+
+pub fn localize_system_label(label: &str) -> String {
+    match current_locale() {
+        Locale::English => label.to_string(),
+        Locale::Indonesian => match label {
+            "Transfer Out" => "Transfer Keluar".to_string(),
+            "Transfer In" => "Transfer Masuk".to_string(),
+            _ => label.to_string(),
+        },
     }
 }
 
@@ -195,9 +246,16 @@ fn localize_to_indonesian(message: &str) -> String {
         "ITICK_API_KEY not configured" => "ITICK_API_KEY belum dikonfigurasi",
         "Failed to parse iTick quote price" => "Gagal mengurai harga kuotasi iTick",
         "Failed to parse iTick EOD close" => "Gagal mengurai harga penutupan EOD iTick",
+        "Failed to parse iTick price" => "Gagal mengurai harga iTick",
         "Failed to parse price" => "Gagal mengurai harga",
         "Failed to parse CoinGecko price" => "Gagal mengurai harga CoinGecko",
         "Failed to parse exchange rate" => "Gagal mengurai nilai tukar",
+        "Failed to compute month start" => "Gagal menghitung awal bulan",
+        "Failed to compute next month" => "Gagal menghitung bulan berikutnya",
+        "Failed to compute previous month bounds" => {
+            "Gagal menghitung rentang bulan sebelumnya"
+        }
+        "Failed to compute previous month start" => "Gagal menghitung awal bulan sebelumnya",
         _ => return localize_dynamic_to_indonesian(message),
     };
 
@@ -247,6 +305,18 @@ fn localize_dynamic_to_indonesian(message: &str) -> String {
     if let Some(rest) = message.strip_prefix("iTick API connection failed: ") {
         return format!("Koneksi API iTick gagal: {}", rest);
     }
+    if let Some(rest) = message.strip_prefix("iTick API returned error ") {
+        return format!("API iTick mengembalikan error {}", rest);
+    }
+    if let Some(rest) = message.strip_prefix("Failed to parse iTick response: ") {
+        return format!("Gagal mengurai respons iTick: {}", rest);
+    }
+    if let Some(rest) = message.strip_prefix("iTick API returned error code: ") {
+        return format!("API iTick mengembalikan kode error: {}", rest);
+    }
+    if let Some(rest) = message.strip_prefix("No data found for ") {
+        return format!("Data tidak ditemukan untuk {}", rest);
+    }
     if let Some(rest) = message.strip_prefix("iTick quote API returned error ") {
         return format!("API kuotasi iTick mengembalikan error {}", rest);
     }
@@ -292,8 +362,29 @@ fn localize_dynamic_to_indonesian(message: &str) -> String {
     if let Some(rest) = message.strip_prefix("Failed to parse Yahoo response: ") {
         return format!("Gagal mengurai respons Yahoo: {}", rest);
     }
-    if let Some(rest) = message.strip_prefix("No data found for ") {
-        return format!("Data tidak ditemukan untuk {}", rest);
+    if let Some(rest) = message.strip_prefix("Stooq API connection failed: ") {
+        return format!("Koneksi API Stooq gagal: {}", rest);
+    }
+    if let Some(rest) = message.strip_prefix("Stooq API returned error ") {
+        return format!("API Stooq mengembalikan error {}", rest);
+    }
+    if let Some(rest) = message.strip_prefix("Failed to read Stooq response: ") {
+        return format!("Gagal membaca respons Stooq: {}", rest);
+    }
+    if message == "No data found on Stooq" {
+        return "Data tidak ditemukan di Stooq".to_string();
+    }
+    if let Some(rest) = message.strip_prefix("Unexpected Stooq CSV row: ") {
+        return format!("Baris CSV Stooq tidak terduga: {}", rest);
+    }
+    if let Some(rest) = message.strip_prefix("No Stooq close price for ") {
+        return format!("Harga penutupan Stooq tidak tersedia untuk {}", rest);
+    }
+    if let Some(rest) = message.strip_prefix("Failed to parse Stooq close price: ") {
+        return format!("Gagal mengurai harga penutupan Stooq: {}", rest);
+    }
+    if message == "Failed to parse Stooq price" {
+        return "Gagal mengurai harga Stooq".to_string();
     }
     if let Some(rest) = message.strip_prefix("Binance API connection failed: ") {
         return format!("Koneksi API Binance gagal: {}", rest);
@@ -328,14 +419,23 @@ fn localize_dynamic_to_indonesian(message: &str) -> String {
     if let Some(rest) = message.strip_prefix("CoinGecko icon API connection failed: ") {
         return format!("Koneksi API ikon CoinGecko gagal: {}", rest);
     }
-    if let Some(rest) = message.strip_prefix("Frankfurter API connection failed: ") {
-        return format!("Koneksi API Frankfurter gagal: {}", rest);
+    if let Some(rest) = message.strip_prefix("FX API connection failed: ") {
+        return format!("Koneksi API nilai tukar gagal: {}", rest);
     }
-    if let Some(rest) = message.strip_prefix("Frankfurter API returned error: ") {
-        return format!("API Frankfurter mengembalikan error: {}", rest);
+    if let Some(rest) = message.strip_prefix("FX API returned error: ") {
+        return format!("API nilai tukar mengembalikan error: {}", rest);
     }
-    if let Some(rest) = message.strip_prefix("Failed to parse Frankfurter response: ") {
-        return format!("Gagal mengurai respons Frankfurter: {}", rest);
+    if let Some(rest) = message.strip_prefix("Failed to parse FX API response: ") {
+        return format!("Gagal mengurai respons API nilai tukar: {}", rest);
+    }
+    if let Some(rest) = message.strip_prefix("FX API returned non-success result: ") {
+        return format!(
+            "API nilai tukar mengembalikan hasil yang tidak sukses: {}",
+            rest
+        );
+    }
+    if message == "FX API missing rates" {
+        return "API nilai tukar tidak mengembalikan nilai tukar".to_string();
     }
     if let Some(rest) = message.strip_prefix("No rate found for ") {
         return format!("Nilai tukar tidak ditemukan untuk {}", rest);
@@ -346,7 +446,19 @@ fn localize_dynamic_to_indonesian(message: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{Locale, localize_message, parse_locale};
+    use super::{
+        Locale, localize_basis, localize_message, localize_plan, localize_status,
+        localize_system_label, parse_locale, with_request_locale,
+    };
+    use axum::{
+        Json, Router,
+        body::Body,
+        http::{Request, StatusCode},
+        middleware,
+        routing::get,
+    };
+    use serde_json::Value;
+    use tower::ServiceExt;
 
     #[test]
     fn parse_locale_handles_language_and_region() {
@@ -357,11 +469,127 @@ mod tests {
 
     #[tokio::test]
     async fn localize_message_uses_request_locale_context() {
-        super::REQUEST_LOCALE
-            .scope(Locale::Indonesian, async {
-                let translated = localize_message("Pocket not found");
-                assert_eq!(translated, "Dompet tidak ditemukan");
-            })
-            .await;
+        super::run_with_locale(Locale::Indonesian, async {
+            let translated = localize_message("Pocket not found");
+            assert_eq!(translated, "Dompet tidak ditemukan");
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn localization_helpers_translate_hardcoded_values() {
+        super::run_with_locale(Locale::Indonesian, async {
+            assert_eq!(localize_basis("monthly"), "bulanan");
+            assert_eq!(localize_plan("free"), "gratis");
+            assert_eq!(localize_status("active"), "aktif");
+            assert_eq!(localize_system_label("Transfer Out"), "Transfer Keluar");
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn middleware_uses_x_language_header() {
+        let app = Router::new()
+            .route(
+                "/",
+                get(|| async { Json(serde_json::json!({ "message": localize_message("Pocket not found") })) }),
+            )
+            .layer(middleware::from_fn(with_request_locale));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/")
+                    .header("x-language", "id")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["content-language"], "id");
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["message"], "Dompet tidak ditemukan");
+    }
+
+    #[tokio::test]
+    async fn middleware_uses_accept_language_header() {
+        let app = Router::new()
+            .route(
+                "/",
+                get(|| async { Json(serde_json::json!({ "message": localize_message("Login successful") })) }),
+            )
+            .layer(middleware::from_fn(with_request_locale));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/")
+                    .header("accept-language", "id-ID,id;q=0.9,en;q=0.8")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.headers()["content-language"], "id");
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["message"], "Login berhasil");
+    }
+
+    #[tokio::test]
+    async fn middleware_defaults_to_english() {
+        let app = Router::new()
+            .route(
+                "/",
+                get(|| async { Json(serde_json::json!({ "message": localize_message("Login successful") })) }),
+            )
+            .layer(middleware::from_fn(with_request_locale));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.headers()["content-language"], "en");
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["message"], "Login successful");
+    }
+
+    #[tokio::test]
+    async fn localize_message_covers_current_provider_errors() {
+        super::run_with_locale(Locale::Indonesian, async {
+            assert_eq!(
+                localize_message("Stooq API connection failed: timeout"),
+                "Koneksi API Stooq gagal: timeout"
+            );
+            assert_eq!(
+                localize_message("FX API returned error: 500"),
+                "API nilai tukar mengembalikan error: 500"
+            );
+            assert_eq!(
+                localize_message("Failed to compute next month"),
+                "Gagal menghitung bulan berikutnya"
+            );
+        })
+        .await;
     }
 }

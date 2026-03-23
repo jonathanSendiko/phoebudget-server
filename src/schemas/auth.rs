@@ -2,6 +2,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::i18n;
+
 #[derive(Deserialize, Debug)]
 pub struct RegisterRequest {
     pub username: String,
@@ -21,6 +23,13 @@ pub struct AuthResponse {
     pub token: String,
     pub refresh_token: String,
     pub message: String,
+}
+
+impl AuthResponse {
+    pub fn localize(mut self) -> Self {
+        self.message = i18n::localize_message(&self.message);
+        self
+    }
 }
 
 #[derive(Deserialize, Debug)]

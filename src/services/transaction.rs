@@ -4,6 +4,7 @@ use rust_decimal::Decimal;
 use uuid::Uuid;
 
 use crate::error::AppError;
+use crate::i18n;
 use crate::investments;
 use crate::repository::{PocketRepository, SettingsRepository, TransactionRepository};
 use crate::schemas::{Category, CreateTransaction, Pocket, TransactionDetail};
@@ -609,7 +610,7 @@ where
                 Some(
                     req.description
                         .clone()
-                        .unwrap_or_else(|| "Transfer Out".to_string()),
+                        .unwrap_or_else(|| i18n::localize_system_label("Transfer Out")),
                 ),
                 cat_out.id,
                 Utc::now(),
@@ -628,7 +629,7 @@ where
                 Some(
                     req.description
                         .clone()
-                        .unwrap_or_else(|| "Transfer In".to_string()),
+                        .unwrap_or_else(|| i18n::localize_system_label("Transfer In")),
                 ),
                 cat_in.id,
                 Utc::now(),
@@ -710,6 +711,7 @@ mod tests {
         ExchangeRateProvider, PocketRepo, SettingsRepo, TransactionRepo, TransactionService,
     };
     use crate::error::AppError;
+    use crate::i18n::{Locale, run_with_locale};
     use crate::schemas::{
         Category, CategorySummary, CreateTransaction, Pocket, Transaction, TransferRequest,
         UpdateTransaction,
@@ -1734,6 +1736,76 @@ mod tests {
         assert_eq!(
             state.create_calls[1].description,
             Some("Transfer In".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn transfer_funds_localizes_generated_descriptions() {
+        let mut tx_state = MockTransactionState::default();
+        tx_state.get_pocket_balance = Decimal::new(10, 0);
+        tx_state.categories.insert(
+            "Transfer Out".to_string(),
+            CategoryStub {
+                id: 101,
+                is_income: false,
+                icon: "out".to_string(),
+                exclude_from_analysis: false,
+            },
+        );
+        tx_state.categories.insert(
+            "Transfer In".to_string(),
+            CategoryStub {
+                id: 102,
+                is_income: true,
+                icon: "in".to_string(),
+                exclude_from_analysis: false,
+            },
+        );
+        let tx_repo = MockTransactionRepo {
+            state: Arc::new(Mutex::new(tx_state)),
+        };
+
+        let source_id = Uuid::new_v4();
+        let dest_id = Uuid::new_v4();
+        let mut pocket_state = MockPocketState {
+            default_pocket: default_pocket(source_id),
+            ..Default::default()
+        };
+        pocket_state
+            .pockets
+            .insert(source_id, default_pocket(source_id));
+        pocket_state
+            .pockets
+            .insert(dest_id, default_pocket(dest_id));
+        let pocket_repo = MockPocketRepo {
+            state: Arc::new(Mutex::new(pocket_state)),
+        };
+        let settings_repo = MockSettingsRepo {
+            base_currency: "USD".to_string(),
+        };
+        let fx = MockExchangeRateProvider::default();
+        let service = make_transaction_service(tx_repo.clone(), pocket_repo, settings_repo, fx);
+
+        let req = TransferRequest {
+            amount: Decimal::new(5, 0),
+            source_pocket_id: source_id,
+            destination_pocket_id: dest_id,
+            description: None,
+        };
+
+        run_with_locale(Locale::Indonesian, async {
+            service.transfer_funds(Uuid::new_v4(), req).await.unwrap();
+        })
+        .await;
+
+        let state = tx_repo.state.lock().unwrap();
+        assert_eq!(
+            state.create_calls[0].description,
+            Some("Transfer Keluar".to_string())
+        );
+        assert_eq!(
+            state.create_calls[1].description,
+            Some("Transfer Masuk".to_string())
         );
     }
 }
