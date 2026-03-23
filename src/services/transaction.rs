@@ -4,7 +4,6 @@ use rust_decimal::Decimal;
 use uuid::Uuid;
 
 use crate::error::AppError;
-use crate::i18n;
 use crate::investments;
 use crate::repository::{PocketRepository, SettingsRepository, TransactionRepository};
 use crate::schemas::{Category, CreateTransaction, Pocket, TransactionDetail};
@@ -610,7 +609,7 @@ where
                 Some(
                     req.description
                         .clone()
-                        .unwrap_or_else(|| i18n::localize_system_label("Transfer Out")),
+                        .unwrap_or_else(|| "Transfer Out".to_string()),
                 ),
                 cat_out.id,
                 Utc::now(),
@@ -629,7 +628,7 @@ where
                 Some(
                     req.description
                         .clone()
-                        .unwrap_or_else(|| i18n::localize_system_label("Transfer In")),
+                        .unwrap_or_else(|| "Transfer In".to_string()),
                 ),
                 cat_in.id,
                 Utc::now(),
@@ -711,7 +710,6 @@ mod tests {
         ExchangeRateProvider, PocketRepo, SettingsRepo, TransactionRepo, TransactionService,
     };
     use crate::error::AppError;
-    use crate::i18n::{Locale, run_with_locale};
     use crate::schemas::{
         Category, CategorySummary, CreateTransaction, Pocket, Transaction, TransferRequest,
         UpdateTransaction,
@@ -1740,7 +1738,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn transfer_funds_localizes_generated_descriptions() {
+    async fn transfer_funds_keeps_generated_descriptions_canonical() {
         let mut tx_state = MockTransactionState::default();
         tx_state.get_pocket_balance = Decimal::new(10, 0);
         tx_state.categories.insert(
@@ -1793,19 +1791,16 @@ mod tests {
             description: None,
         };
 
-        run_with_locale(Locale::Indonesian, async {
-            service.transfer_funds(Uuid::new_v4(), req).await.unwrap();
-        })
-        .await;
+        service.transfer_funds(Uuid::new_v4(), req).await.unwrap();
 
         let state = tx_repo.state.lock().unwrap();
         assert_eq!(
             state.create_calls[0].description,
-            Some("Transfer Keluar".to_string())
+            Some("Transfer Out".to_string())
         );
         assert_eq!(
             state.create_calls[1].description,
-            Some("Transfer Masuk".to_string())
+            Some("Transfer In".to_string())
         );
     }
 }
