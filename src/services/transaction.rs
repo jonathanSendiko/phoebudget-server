@@ -1736,4 +1736,71 @@ mod tests {
             Some("Transfer In".to_string())
         );
     }
+
+    #[tokio::test]
+    async fn transfer_funds_keeps_generated_descriptions_canonical() {
+        let mut tx_state = MockTransactionState::default();
+        tx_state.get_pocket_balance = Decimal::new(10, 0);
+        tx_state.categories.insert(
+            "Transfer Out".to_string(),
+            CategoryStub {
+                id: 101,
+                is_income: false,
+                icon: "out".to_string(),
+                exclude_from_analysis: false,
+            },
+        );
+        tx_state.categories.insert(
+            "Transfer In".to_string(),
+            CategoryStub {
+                id: 102,
+                is_income: true,
+                icon: "in".to_string(),
+                exclude_from_analysis: false,
+            },
+        );
+        let tx_repo = MockTransactionRepo {
+            state: Arc::new(Mutex::new(tx_state)),
+        };
+
+        let source_id = Uuid::new_v4();
+        let dest_id = Uuid::new_v4();
+        let mut pocket_state = MockPocketState {
+            default_pocket: default_pocket(source_id),
+            ..Default::default()
+        };
+        pocket_state
+            .pockets
+            .insert(source_id, default_pocket(source_id));
+        pocket_state
+            .pockets
+            .insert(dest_id, default_pocket(dest_id));
+        let pocket_repo = MockPocketRepo {
+            state: Arc::new(Mutex::new(pocket_state)),
+        };
+        let settings_repo = MockSettingsRepo {
+            base_currency: "USD".to_string(),
+        };
+        let fx = MockExchangeRateProvider::default();
+        let service = make_transaction_service(tx_repo.clone(), pocket_repo, settings_repo, fx);
+
+        let req = TransferRequest {
+            amount: Decimal::new(5, 0),
+            source_pocket_id: source_id,
+            destination_pocket_id: dest_id,
+            description: None,
+        };
+
+        service.transfer_funds(Uuid::new_v4(), req).await.unwrap();
+
+        let state = tx_repo.state.lock().unwrap();
+        assert_eq!(
+            state.create_calls[0].description,
+            Some("Transfer Out".to_string())
+        );
+        assert_eq!(
+            state.create_calls[1].description,
+            Some("Transfer In".to_string())
+        );
+    }
 }

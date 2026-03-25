@@ -19,7 +19,7 @@ pub async fn create_pocket(
         .await?;
     Ok(Json(ApiResponse::success(
         PocketId { id },
-        Some(i18n::localize_message("Pocket created")),
+        Some("Pocket created".to_string()),
     )))
 }
 
