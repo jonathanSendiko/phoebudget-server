@@ -46,6 +46,57 @@ impl GoalRepository {
         Ok(id)
     }
 
+    pub async fn create_with_sub_goals(
+        &self,
+        user_id: Uuid,
+        pocket_id: Uuid,
+        name: &str,
+        description: Option<String>,
+        target_amount: Decimal,
+        current_amount: Option<Decimal>,
+        icon: Option<String>,
+        sub_goals: &[crate::schemas::CreateSubGoal],
+    ) -> Result<Uuid, AppError> {
+        let mut tx = self.pool.begin().await?;
+        let icon = icon.unwrap_or_else(|| "savings".to_string());
+        let current_amount = current_amount.unwrap_or(Decimal::ZERO);
+
+        let id = sqlx::query_scalar::<_, Uuid>(
+            r#"
+            INSERT INTO financial_goals (user_id, pocket_id, name, description, target_amount, current_amount, icon)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            RETURNING id
+            "#,
+        )
+        .bind(user_id)
+        .bind(pocket_id)
+        .bind(name)
+        .bind(description)
+        .bind(target_amount)
+        .bind(current_amount)
+        .bind(icon)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        for (position, sub_goal) in sub_goals.iter().enumerate() {
+            sqlx::query(
+                r#"
+                INSERT INTO goal_sub_goals (goal_id, name, target_amount, position)
+                VALUES ($1, $2, $3, $4)
+                "#,
+            )
+            .bind(id)
+            .bind(&sub_goal.name)
+            .bind(sub_goal.target_amount)
+            .bind(position as i32)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+        Ok(id)
+    }
+
     pub async fn get_all(
         &self,
         user_id: Uuid,
@@ -154,6 +205,7 @@ impl GoalRepository {
                 name: row.pocket_name,
                 icon: row.pocket_icon,
             },
+            sub_goals: Vec::new(),
             created_at: row.created_at,
         })
     }
@@ -194,6 +246,75 @@ impl GoalRepository {
         .execute(&self.pool)
         .await?;
         Ok(result.rows_affected())
+    }
+
+    pub async fn update_with_sub_goals(
+        &self,
+        id: Uuid,
+        user_id: Uuid,
+        name: Option<String>,
+        description: Option<String>,
+        target_amount: Option<Decimal>,
+        current_amount: Option<Decimal>,
+        pocket_id: Option<Uuid>,
+        icon: Option<String>,
+        sub_goals: &[crate::schemas::CreateSubGoal],
+    ) -> Result<u64, AppError> {
+        let mut tx = self.pool.begin().await?;
+
+        let result = sqlx::query(
+            r#"
+            UPDATE financial_goals
+            SET
+                name = COALESCE($3, name),
+                description = COALESCE($4, description),
+                target_amount = COALESCE($5, target_amount),
+                current_amount = COALESCE($6, current_amount),
+                pocket_id = COALESCE($7, pocket_id),
+                icon = COALESCE($8, icon),
+                updated_at = NOW()
+            WHERE id = $1 AND user_id = $2
+            "#,
+        )
+        .bind(id)
+        .bind(user_id)
+        .bind(&name)
+        .bind(&description)
+        .bind(target_amount)
+        .bind(current_amount)
+        .bind(pocket_id)
+        .bind(&icon)
+        .execute(&mut *tx)
+        .await?;
+
+        let rows_affected = result.rows_affected();
+        if rows_affected == 0 {
+            tx.rollback().await?;
+            return Ok(0);
+        }
+
+        sqlx::query("DELETE FROM goal_sub_goals WHERE goal_id = $1")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+
+        for (position, sub_goal) in sub_goals.iter().enumerate() {
+            sqlx::query(
+                r#"
+                INSERT INTO goal_sub_goals (goal_id, name, target_amount, position)
+                VALUES ($1, $2, $3, $4)
+                "#,
+            )
+            .bind(id)
+            .bind(&sub_goal.name)
+            .bind(sub_goal.target_amount)
+            .bind(position as i32)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+        Ok(rows_affected)
     }
 
     pub async fn delete(&self, id: Uuid, user_id: Uuid) -> Result<u64, AppError> {

@@ -20,7 +20,9 @@ pub use finance::{
     FinanceSettingsRepo, FinanceTransactionRepo,
     HttpExchangeRateProvider as HttpFinanceExchangeRateProvider, HttpPriceProvider, PriceProvider,
 };
-pub use goal::{GoalEntryRepo, GoalPocketRepo, GoalRepo, GoalService, GoalServiceImpl};
+pub use goal::{
+    GoalEntryRepo, GoalPocketRepo, GoalRepo, GoalService, GoalServiceImpl, SubGoalRepo,
+};
 pub use pocket::{PocketRepo, PocketService, PocketServiceImpl, PocketTransactionRepo};
 pub use subscription::SubscriptionService;
 pub use transaction::{

@@ -3,7 +3,10 @@ use rust_decimal::Decimal;
 use uuid::Uuid;
 
 use crate::error::AppError;
-use crate::repository::{GoalEntryRepository, GoalRepository, PocketRepository};
+use crate::repository::{GoalEntryRepository, GoalRepository, PocketRepository, SubGoalRepository};
+
+const MAX_SUB_GOALS: usize = 50;
+const MAX_CURRENCY_SCALE: u32 = 2;
 
 #[async_trait]
 pub trait GoalRepo: Send + Sync {
@@ -16,6 +19,17 @@ pub trait GoalRepo: Send + Sync {
         target_amount: Decimal,
         current_amount: Option<Decimal>,
         icon: Option<String>,
+    ) -> Result<Uuid, AppError>;
+    async fn create_with_sub_goals(
+        &self,
+        user_id: Uuid,
+        pocket_id: Uuid,
+        name: &str,
+        description: Option<String>,
+        target_amount: Decimal,
+        current_amount: Option<Decimal>,
+        icon: Option<String>,
+        sub_goals: &[crate::schemas::CreateSubGoal],
     ) -> Result<Uuid, AppError>;
     async fn get_all(&self, user_id: Uuid) -> Result<Vec<crate::schemas::GoalSummary>, AppError>;
     async fn get_by_id(
@@ -33,6 +47,18 @@ pub trait GoalRepo: Send + Sync {
         current_amount: Option<Decimal>,
         pocket_id: Option<Uuid>,
         icon: Option<String>,
+    ) -> Result<u64, AppError>;
+    async fn update_with_sub_goals(
+        &self,
+        id: Uuid,
+        user_id: Uuid,
+        name: Option<String>,
+        description: Option<String>,
+        target_amount: Option<Decimal>,
+        current_amount: Option<Decimal>,
+        pocket_id: Option<Uuid>,
+        icon: Option<String>,
+        sub_goals: &[crate::schemas::CreateSubGoal],
     ) -> Result<u64, AppError>;
     async fn delete(&self, id: Uuid, user_id: Uuid) -> Result<u64, AppError>;
 }
@@ -55,6 +81,16 @@ pub trait GoalPocketRepo: Send + Sync {
 }
 
 #[async_trait]
+pub trait SubGoalRepo: Send + Sync {
+    async fn replace_for_goal(
+        &self,
+        goal_id: Uuid,
+        sub_goals: &[crate::schemas::CreateSubGoal],
+    ) -> Result<(), AppError>;
+    async fn get_by_goal(&self, goal_id: Uuid) -> Result<Vec<crate::schemas::SubGoal>, AppError>;
+}
+
+#[async_trait]
 impl GoalRepo for GoalRepository {
     async fn create(
         &self,
@@ -74,6 +110,30 @@ impl GoalRepo for GoalRepository {
             target_amount,
             current_amount,
             icon,
+        )
+        .await
+    }
+
+    async fn create_with_sub_goals(
+        &self,
+        user_id: Uuid,
+        pocket_id: Uuid,
+        name: &str,
+        description: Option<String>,
+        target_amount: Decimal,
+        current_amount: Option<Decimal>,
+        icon: Option<String>,
+        sub_goals: &[crate::schemas::CreateSubGoal],
+    ) -> Result<Uuid, AppError> {
+        self.create_with_sub_goals(
+            user_id,
+            pocket_id,
+            name,
+            description,
+            target_amount,
+            current_amount,
+            icon,
+            sub_goals,
         )
         .await
     }
@@ -114,6 +174,32 @@ impl GoalRepo for GoalRepository {
         .await
     }
 
+    async fn update_with_sub_goals(
+        &self,
+        id: Uuid,
+        user_id: Uuid,
+        name: Option<String>,
+        description: Option<String>,
+        target_amount: Option<Decimal>,
+        current_amount: Option<Decimal>,
+        pocket_id: Option<Uuid>,
+        icon: Option<String>,
+        sub_goals: &[crate::schemas::CreateSubGoal],
+    ) -> Result<u64, AppError> {
+        self.update_with_sub_goals(
+            id,
+            user_id,
+            name,
+            description,
+            target_amount,
+            current_amount,
+            pocket_id,
+            icon,
+            sub_goals,
+        )
+        .await
+    }
+
     async fn delete(&self, id: Uuid, user_id: Uuid) -> Result<u64, AppError> {
         self.delete(id, user_id).await
     }
@@ -143,25 +229,49 @@ impl GoalPocketRepo for PocketRepository {
     }
 }
 
-pub type GoalServiceImpl = GoalService<GoalRepository, GoalEntryRepository, PocketRepository>;
+#[async_trait]
+impl SubGoalRepo for SubGoalRepository {
+    async fn replace_for_goal(
+        &self,
+        goal_id: Uuid,
+        sub_goals: &[crate::schemas::CreateSubGoal],
+    ) -> Result<(), AppError> {
+        self.replace_for_goal(goal_id, sub_goals).await
+    }
 
-pub struct GoalService<GRepo, ERepo, PRepo> {
+    async fn get_by_goal(&self, goal_id: Uuid) -> Result<Vec<crate::schemas::SubGoal>, AppError> {
+        self.get_by_goal(goal_id).await
+    }
+}
+
+pub type GoalServiceImpl =
+    GoalService<GoalRepository, GoalEntryRepository, PocketRepository, SubGoalRepository>;
+
+pub struct GoalService<GRepo, ERepo, PRepo, SRepo> {
     goal_repo: GRepo,
     entry_repo: ERepo,
     pocket_repo: PRepo,
+    sub_goal_repo: SRepo,
 }
 
-impl<GRepo, ERepo, PRepo> GoalService<GRepo, ERepo, PRepo>
+impl<GRepo, ERepo, PRepo, SRepo> GoalService<GRepo, ERepo, PRepo, SRepo>
 where
     GRepo: GoalRepo,
     ERepo: GoalEntryRepo,
     PRepo: GoalPocketRepo,
+    SRepo: SubGoalRepo,
 {
-    pub fn new(goal_repo: GRepo, entry_repo: ERepo, pocket_repo: PRepo) -> Self {
+    pub fn new(
+        goal_repo: GRepo,
+        entry_repo: ERepo,
+        pocket_repo: PRepo,
+        sub_goal_repo: SRepo,
+    ) -> Self {
         Self {
             goal_repo,
             entry_repo,
             pocket_repo,
+            sub_goal_repo,
         }
     }
 
@@ -175,6 +285,10 @@ where
                 "Target amount must be positive".to_string(),
             ));
         }
+        validate_currency_scale(req.target_amount, "Target amount")?;
+        if let Some(current_amount) = req.current_amount {
+            validate_currency_scale(current_amount, "Current amount")?;
+        }
 
         if req.name.trim().is_empty() {
             return Err(AppError::ValidationError(
@@ -182,20 +296,41 @@ where
             ));
         }
 
+        if let Some(sub_goals) = &req.sub_goals {
+            validate_sub_goals(sub_goals, req.target_amount)?;
+        }
+
         // Verify pocket exists and belongs to user
         let _ = self.pocket_repo.get_by_id(req.pocket_id, user_id).await?;
 
-        self.goal_repo
-            .create(
-                user_id,
-                req.pocket_id,
-                &req.name,
-                req.description,
-                req.target_amount,
-                req.current_amount,
-                req.icon,
-            )
-            .await
+        let goal_id = if let Some(sub_goals) = &req.sub_goals {
+            self.goal_repo
+                .create_with_sub_goals(
+                    user_id,
+                    req.pocket_id,
+                    &req.name,
+                    req.description,
+                    req.target_amount,
+                    req.current_amount,
+                    req.icon,
+                    sub_goals,
+                )
+                .await?
+        } else {
+            self.goal_repo
+                .create(
+                    user_id,
+                    req.pocket_id,
+                    &req.name,
+                    req.description,
+                    req.target_amount,
+                    req.current_amount,
+                    req.icon,
+                )
+                .await?
+        };
+
+        Ok(goal_id)
     }
 
     pub async fn get_goals(
@@ -210,7 +345,9 @@ where
         id: Uuid,
         user_id: Uuid,
     ) -> Result<crate::schemas::GoalDetail, AppError> {
-        self.goal_repo.get_by_id(id, user_id).await
+        let mut goal = self.goal_repo.get_by_id(id, user_id).await?;
+        goal.sub_goals = self.sub_goal_repo.get_by_goal(id).await?;
+        Ok(goal)
     }
 
     pub async fn update_goal(
@@ -225,25 +362,66 @@ where
                     "Target amount must be positive".to_string(),
                 ));
             }
+            validate_currency_scale(target, "Target amount")?;
+        }
+
+        if let Some(current_amount) = req.current_amount {
+            validate_currency_scale(current_amount, "Current amount")?;
         }
 
         if let Some(pocket_id) = req.pocket_id {
             self.pocket_repo.get_by_id(pocket_id, user_id).await?;
         }
 
-        let updated = self
-            .goal_repo
-            .update(
-                id,
-                user_id,
-                req.name,
-                req.description,
-                req.target_amount,
-                req.current_amount,
-                req.pocket_id,
-                req.icon,
-            )
-            .await?;
+        if req.sub_goals.is_some() || req.target_amount.is_some() {
+            let current_goal = self.goal_repo.get_by_id(id, user_id).await?;
+            let target_amount = req.target_amount.unwrap_or(current_goal.target_amount);
+            if let Some(sub_goals) = &req.sub_goals {
+                validate_sub_goals(sub_goals, target_amount)?;
+            } else {
+                let existing_sub_goals = self.sub_goal_repo.get_by_goal(id).await?;
+                if !existing_sub_goals.is_empty() {
+                    let total: Decimal = existing_sub_goals
+                        .iter()
+                        .map(|sub_goal| sub_goal.target_amount)
+                        .sum();
+                    if total != target_amount {
+                        return Err(AppError::ValidationError(
+                            "Sub goal total must equal goal target amount".to_string(),
+                        ));
+                    }
+                }
+            }
+        }
+
+        let updated = if let Some(sub_goals) = &req.sub_goals {
+            self.goal_repo
+                .update_with_sub_goals(
+                    id,
+                    user_id,
+                    req.name,
+                    req.description,
+                    req.target_amount,
+                    req.current_amount,
+                    req.pocket_id,
+                    req.icon,
+                    sub_goals,
+                )
+                .await?
+        } else {
+            self.goal_repo
+                .update(
+                    id,
+                    user_id,
+                    req.name,
+                    req.description,
+                    req.target_amount,
+                    req.current_amount,
+                    req.pocket_id,
+                    req.icon,
+                )
+                .await?
+        };
 
         if updated == 0 {
             return Err(AppError::NotFoundError("Goal not found".to_string()));
@@ -304,12 +482,70 @@ where
     }
 }
 
+fn validate_sub_goals(
+    sub_goals: &[crate::schemas::CreateSubGoal],
+    target_amount: Decimal,
+) -> Result<(), AppError> {
+    if sub_goals.len() > MAX_SUB_GOALS {
+        return Err(AppError::ValidationError(
+            "Sub goals cannot exceed 50 items".to_string(),
+        ));
+    }
+
+    if sub_goals.is_empty() {
+        return Ok(());
+    }
+
+    let mut total = Decimal::ZERO;
+    for sub_goal in sub_goals {
+        if sub_goal.name.trim().is_empty() {
+            return Err(AppError::ValidationError(
+                "Sub goal name cannot be empty".to_string(),
+            ));
+        }
+
+        if sub_goal.name.len() > 100 {
+            return Err(AppError::ValidationError(
+                "Sub goal name cannot exceed 100 characters".to_string(),
+            ));
+        }
+
+        if sub_goal.target_amount <= Decimal::ZERO {
+            return Err(AppError::ValidationError(
+                "Sub goal target amount must be positive".to_string(),
+            ));
+        }
+        validate_currency_scale(sub_goal.target_amount, "Sub goal target amount")?;
+
+        total += sub_goal.target_amount;
+    }
+
+    if total != target_amount {
+        return Err(AppError::ValidationError(
+            "Sub goal total must equal goal target amount".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
+fn validate_currency_scale(amount: Decimal, field_name: &str) -> Result<(), AppError> {
+    if amount.scale() > MAX_CURRENCY_SCALE {
+        return Err(AppError::ValidationError(format!(
+            "{field_name} cannot have more than 2 decimal places"
+        )));
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{GoalEntryRepo, GoalPocketRepo, GoalRepo, GoalService};
+    use super::{GoalEntryRepo, GoalPocketRepo, GoalRepo, GoalService, SubGoalRepo};
     use crate::error::AppError;
     use crate::schemas::{
-        CreateGoal, CreateGoalEntry, GoalDetail, GoalEntry, GoalSummary, Pocket, UpdateGoal,
+        CreateGoal, CreateGoalEntry, CreateSubGoal, GoalDetail, GoalEntry, GoalSummary, Pocket,
+        SubGoal, UpdateGoal,
     };
     use async_trait::async_trait;
     use chrono::{DateTime, Utc};
@@ -334,6 +570,16 @@ mod tests {
             Option<Decimal>,
             Option<String>,
         )>,
+        create_with_sub_goal_calls: Vec<(
+            Uuid,
+            Uuid,
+            String,
+            Option<String>,
+            Decimal,
+            Option<Decimal>,
+            Option<String>,
+            Vec<CreateSubGoal>,
+        )>,
         update_calls: Vec<(
             Uuid,
             Uuid,
@@ -344,6 +590,17 @@ mod tests {
             Option<Uuid>,
             Option<String>,
         )>,
+        update_with_sub_goal_calls: Vec<(
+            Uuid,
+            Uuid,
+            Option<String>,
+            Option<String>,
+            Option<Decimal>,
+            Option<Decimal>,
+            Option<Uuid>,
+            Option<String>,
+            Vec<CreateSubGoal>,
+        )>,
         delete_result: u64,
     }
 
@@ -352,7 +609,9 @@ mod tests {
             Self {
                 goals: HashMap::new(),
                 create_calls: Vec::new(),
+                create_with_sub_goal_calls: Vec::new(),
                 update_calls: Vec::new(),
+                update_with_sub_goal_calls: Vec::new(),
                 delete_result: 1,
             }
         }
@@ -379,6 +638,31 @@ mod tests {
                 target_amount,
                 current_amount,
                 icon,
+            ));
+            Ok(Uuid::new_v4())
+        }
+
+        async fn create_with_sub_goals(
+            &self,
+            user_id: Uuid,
+            pocket_id: Uuid,
+            name: &str,
+            description: Option<String>,
+            target_amount: Decimal,
+            current_amount: Option<Decimal>,
+            icon: Option<String>,
+            sub_goals: &[CreateSubGoal],
+        ) -> Result<Uuid, AppError> {
+            let mut state = self.state.lock().unwrap();
+            state.create_with_sub_goal_calls.push((
+                user_id,
+                pocket_id,
+                name.to_string(),
+                description,
+                target_amount,
+                current_amount,
+                icon,
+                sub_goals.to_vec(),
             ));
             Ok(Uuid::new_v4())
         }
@@ -417,6 +701,33 @@ mod tests {
                 current_amount,
                 pocket_id,
                 icon,
+            ));
+            Ok(state.delete_result)
+        }
+
+        async fn update_with_sub_goals(
+            &self,
+            id: Uuid,
+            user_id: Uuid,
+            name: Option<String>,
+            description: Option<String>,
+            target_amount: Option<Decimal>,
+            current_amount: Option<Decimal>,
+            pocket_id: Option<Uuid>,
+            icon: Option<String>,
+            sub_goals: &[CreateSubGoal],
+        ) -> Result<u64, AppError> {
+            let mut state = self.state.lock().unwrap();
+            state.update_with_sub_goal_calls.push((
+                id,
+                user_id,
+                name,
+                description,
+                target_amount,
+                current_amount,
+                pocket_id,
+                icon,
+                sub_goals.to_vec(),
             ));
             Ok(state.delete_result)
         }
@@ -474,12 +785,52 @@ mod tests {
         }
     }
 
+    #[derive(Clone, Default)]
+    struct MockSubGoalRepo {
+        replace_calls: Arc<Mutex<Vec<(Uuid, Vec<CreateSubGoal>)>>>,
+        sub_goals: Arc<Mutex<Vec<SubGoal>>>,
+    }
+
+    #[async_trait]
+    impl SubGoalRepo for MockSubGoalRepo {
+        async fn replace_for_goal(
+            &self,
+            goal_id: Uuid,
+            sub_goals: &[CreateSubGoal],
+        ) -> Result<(), AppError> {
+            self.replace_calls
+                .lock()
+                .unwrap()
+                .push((goal_id, sub_goals.to_vec()));
+            Ok(())
+        }
+
+        async fn get_by_goal(&self, _goal_id: Uuid) -> Result<Vec<SubGoal>, AppError> {
+            let sub_goals = self.sub_goals.lock().unwrap();
+            Ok(sub_goals.iter().map(clone_sub_goal_ref).collect())
+        }
+    }
+
     fn make_service(
         goal_repo: MockGoalRepo,
         entry_repo: MockGoalEntryRepo,
         pocket_repo: MockPocketRepo,
-    ) -> GoalService<MockGoalRepo, MockGoalEntryRepo, MockPocketRepo> {
-        GoalService::new(goal_repo, entry_repo, pocket_repo)
+    ) -> GoalService<MockGoalRepo, MockGoalEntryRepo, MockPocketRepo, MockSubGoalRepo> {
+        GoalService::new(
+            goal_repo,
+            entry_repo,
+            pocket_repo,
+            MockSubGoalRepo::default(),
+        )
+    }
+
+    fn make_service_with_sub_goals(
+        goal_repo: MockGoalRepo,
+        entry_repo: MockGoalEntryRepo,
+        pocket_repo: MockPocketRepo,
+        sub_goal_repo: MockSubGoalRepo,
+    ) -> GoalService<MockGoalRepo, MockGoalEntryRepo, MockPocketRepo, MockSubGoalRepo> {
+        GoalService::new(goal_repo, entry_repo, pocket_repo, sub_goal_repo)
     }
 
     fn sample_goal_detail(id: Uuid, current_amount: Decimal) -> GoalDetail {
@@ -496,6 +847,7 @@ mod tests {
                 name: "Pocket".to_string(),
                 icon: "icon".to_string(),
             },
+            sub_goals: Vec::new(),
             created_at: None,
         }
     }
@@ -514,7 +866,19 @@ mod tests {
                 name: detail.pocket.name.clone(),
                 icon: detail.pocket.icon.clone(),
             },
+            sub_goals: detail.sub_goals.iter().map(clone_sub_goal_ref).collect(),
             created_at: detail.created_at,
+        }
+    }
+
+    fn clone_sub_goal_ref(sub_goal: &SubGoal) -> SubGoal {
+        SubGoal {
+            id: sub_goal.id,
+            goal_id: sub_goal.goal_id,
+            name: sub_goal.name.clone(),
+            target_amount: sub_goal.target_amount,
+            position: sub_goal.position,
+            created_at: sub_goal.created_at,
         }
     }
 
@@ -543,6 +907,7 @@ mod tests {
             current_amount: None,
             pocket_id: Uuid::new_v4(),
             icon: None,
+            sub_goals: None,
         };
 
         let err = service.create_goal(Uuid::new_v4(), req).await.unwrap_err();
@@ -566,6 +931,7 @@ mod tests {
             current_amount: None,
             pocket_id: Uuid::new_v4(),
             icon: None,
+            sub_goals: None,
         };
 
         let err = service.create_goal(Uuid::new_v4(), req).await.unwrap_err();
@@ -590,6 +956,7 @@ mod tests {
             current_amount: Some(Decimal::new(20, 0)),
             pocket_id,
             icon: Some("icon".to_string()),
+            sub_goals: None,
         };
 
         let _ = service.create_goal(user_id, req).await.unwrap();
@@ -608,6 +975,160 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_goal_rejects_sub_goal_total_mismatch() {
+        let service = make_service(
+            MockGoalRepo::default(),
+            MockGoalEntryRepo::default(),
+            MockPocketRepo::default(),
+        );
+
+        let req = CreateGoal {
+            name: "Goal".to_string(),
+            description: None,
+            target_amount: Decimal::new(100, 0),
+            current_amount: None,
+            pocket_id: Uuid::new_v4(),
+            icon: None,
+            sub_goals: Some(vec![
+                CreateSubGoal {
+                    name: "Part A".to_string(),
+                    target_amount: Decimal::new(40, 0),
+                },
+                CreateSubGoal {
+                    name: "Part B".to_string(),
+                    target_amount: Decimal::new(50, 0),
+                },
+            ]),
+        };
+
+        let err = service.create_goal(Uuid::new_v4(), req).await.unwrap_err();
+        assert!(
+            matches!(err, AppError::ValidationError(msg) if msg == "Sub goal total must equal goal target amount")
+        );
+    }
+
+    #[tokio::test]
+    async fn create_goal_rejects_more_than_fifty_sub_goals() {
+        let service = make_service(
+            MockGoalRepo::default(),
+            MockGoalEntryRepo::default(),
+            MockPocketRepo::default(),
+        );
+
+        let sub_goals = (0..51)
+            .map(|i| CreateSubGoal {
+                name: format!("Part {i}"),
+                target_amount: Decimal::ONE,
+            })
+            .collect();
+
+        let req = CreateGoal {
+            name: "Goal".to_string(),
+            description: None,
+            target_amount: Decimal::new(51, 0),
+            current_amount: None,
+            pocket_id: Uuid::new_v4(),
+            icon: None,
+            sub_goals: Some(sub_goals),
+        };
+
+        let err = service.create_goal(Uuid::new_v4(), req).await.unwrap_err();
+        assert!(
+            matches!(err, AppError::ValidationError(msg) if msg == "Sub goals cannot exceed 50 items")
+        );
+    }
+
+    #[tokio::test]
+    async fn create_goal_uses_atomic_repo_call_for_valid_sub_goals() {
+        let goal_repo = MockGoalRepo::default();
+        let service = make_service(
+            goal_repo.clone(),
+            MockGoalEntryRepo::default(),
+            MockPocketRepo::default(),
+        );
+
+        let req = CreateGoal {
+            name: "Goal".to_string(),
+            description: None,
+            target_amount: Decimal::new(100, 0),
+            current_amount: None,
+            pocket_id: Uuid::new_v4(),
+            icon: None,
+            sub_goals: Some(vec![
+                CreateSubGoal {
+                    name: "Part A".to_string(),
+                    target_amount: Decimal::new(40, 0),
+                },
+                CreateSubGoal {
+                    name: "Part B".to_string(),
+                    target_amount: Decimal::new(60, 0),
+                },
+            ]),
+        };
+
+        service.create_goal(Uuid::new_v4(), req).await.unwrap();
+
+        let state = goal_repo.state.lock().unwrap();
+        assert_eq!(state.create_calls.len(), 0);
+        assert_eq!(state.create_with_sub_goal_calls.len(), 1);
+        assert_eq!(state.create_with_sub_goal_calls[0].7.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn create_goal_rejects_sub_goal_amount_with_more_than_two_decimals() {
+        let service = make_service(
+            MockGoalRepo::default(),
+            MockGoalEntryRepo::default(),
+            MockPocketRepo::default(),
+        );
+
+        let req = CreateGoal {
+            name: "Goal".to_string(),
+            description: None,
+            target_amount: Decimal::new(100, 0),
+            current_amount: None,
+            pocket_id: Uuid::new_v4(),
+            icon: None,
+            sub_goals: Some(vec![CreateSubGoal {
+                name: "Part".to_string(),
+                target_amount: Decimal::new(100000, 3),
+            }]),
+        };
+
+        let err = service.create_goal(Uuid::new_v4(), req).await.unwrap_err();
+        assert!(
+            matches!(err, AppError::ValidationError(msg) if msg == "Sub goal target amount cannot have more than 2 decimal places")
+        );
+    }
+
+    #[tokio::test]
+    async fn create_goal_rejects_sub_goal_name_longer_than_database_limit() {
+        let service = make_service(
+            MockGoalRepo::default(),
+            MockGoalEntryRepo::default(),
+            MockPocketRepo::default(),
+        );
+
+        let req = CreateGoal {
+            name: "Goal".to_string(),
+            description: None,
+            target_amount: Decimal::new(100, 0),
+            current_amount: None,
+            pocket_id: Uuid::new_v4(),
+            icon: None,
+            sub_goals: Some(vec![CreateSubGoal {
+                name: "x".repeat(101),
+                target_amount: Decimal::new(100, 0),
+            }]),
+        };
+
+        let err = service.create_goal(Uuid::new_v4(), req).await.unwrap_err();
+        assert!(
+            matches!(err, AppError::ValidationError(msg) if msg == "Sub goal name cannot exceed 100 characters")
+        );
+    }
+
+    #[tokio::test]
     async fn update_goal_rejects_non_positive_target() {
         let service = make_service(
             MockGoalRepo::default(),
@@ -622,6 +1143,7 @@ mod tests {
             current_amount: None,
             pocket_id: None,
             icon: None,
+            sub_goals: None,
         };
 
         let err = service
@@ -674,6 +1196,7 @@ mod tests {
             current_amount: None,
             pocket_id: Some(pocket_id),
             icon: None,
+            sub_goals: None,
         };
 
         service.update_goal(goal_id, user_id, req).await.unwrap();
@@ -688,6 +1211,49 @@ mod tests {
         assert_eq!(update.1, user_id);
         assert_eq!(update.2.as_deref(), Some("Renamed"));
         assert_eq!(update.6, Some(pocket_id));
+    }
+
+    #[tokio::test]
+    async fn update_goal_uses_atomic_repo_call_when_replacing_sub_goals() {
+        let goal_id = Uuid::new_v4();
+        let user_id = Uuid::new_v4();
+        let mut goal_repo_state = MockGoalState::default();
+        goal_repo_state
+            .goals
+            .insert(goal_id, sample_goal_detail(goal_id, Decimal::ZERO));
+        let goal_repo = MockGoalRepo {
+            state: Arc::new(Mutex::new(goal_repo_state)),
+        };
+        let service = make_service(
+            goal_repo.clone(),
+            MockGoalEntryRepo::default(),
+            MockPocketRepo::default(),
+        );
+
+        service
+            .update_goal(
+                goal_id,
+                user_id,
+                UpdateGoal {
+                    name: None,
+                    description: None,
+                    target_amount: Some(Decimal::new(100, 0)),
+                    current_amount: None,
+                    pocket_id: None,
+                    icon: None,
+                    sub_goals: Some(vec![CreateSubGoal {
+                        name: "Part".to_string(),
+                        target_amount: Decimal::new(100, 0),
+                    }]),
+                },
+            )
+            .await
+            .unwrap();
+
+        let state = goal_repo.state.lock().unwrap();
+        assert_eq!(state.update_calls.len(), 0);
+        assert_eq!(state.update_with_sub_goal_calls.len(), 1);
+        assert_eq!(state.update_with_sub_goal_calls[0].8.len(), 1);
     }
 
     #[tokio::test]
@@ -715,12 +1281,64 @@ mod tests {
                     current_amount: None,
                     pocket_id: None,
                     icon: None,
+                    sub_goals: None,
                 },
             )
             .await
             .unwrap_err();
 
         assert!(matches!(err, AppError::NotFoundError(msg) if msg == "Goal not found"));
+    }
+
+    #[tokio::test]
+    async fn update_goal_rejects_target_when_existing_sub_goals_would_not_match() {
+        let goal_id = Uuid::new_v4();
+        let user_id = Uuid::new_v4();
+        let mut goal_repo_state = MockGoalState::default();
+        goal_repo_state
+            .goals
+            .insert(goal_id, sample_goal_detail(goal_id, Decimal::ZERO));
+        let goal_repo = MockGoalRepo {
+            state: Arc::new(Mutex::new(goal_repo_state)),
+        };
+        let sub_goal_repo = MockSubGoalRepo {
+            replace_calls: Arc::new(Mutex::new(Vec::new())),
+            sub_goals: Arc::new(Mutex::new(vec![SubGoal {
+                id: Uuid::new_v4(),
+                goal_id,
+                name: "Part".to_string(),
+                target_amount: Decimal::new(100, 0),
+                position: 0,
+                created_at: None,
+            }])),
+        };
+        let service = make_service_with_sub_goals(
+            goal_repo,
+            MockGoalEntryRepo::default(),
+            MockPocketRepo::default(),
+            sub_goal_repo,
+        );
+
+        let err = service
+            .update_goal(
+                goal_id,
+                user_id,
+                UpdateGoal {
+                    name: None,
+                    description: None,
+                    target_amount: Some(Decimal::new(120, 0)),
+                    current_amount: None,
+                    pocket_id: None,
+                    icon: None,
+                    sub_goals: None,
+                },
+            )
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(err, AppError::ValidationError(msg) if msg == "Sub goal total must equal goal target amount")
+        );
     }
 
     #[tokio::test]
