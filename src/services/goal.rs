@@ -410,7 +410,9 @@ where
             let current_goal = self.goal_repo.get_by_id(id, user_id).await?;
             let target_amount = req.target_amount.unwrap_or(current_goal.target_amount);
             if let Some(sub_goals) = &req.sub_goals {
-                if self.sub_goal_repo.has_allocated_entries(id).await? {
+                if !current_goal.current_amount.is_zero()
+                    || self.sub_goal_repo.has_allocated_entries(id).await?
+                {
                     return Err(AppError::ValidationError(
                         "Sub goals cannot be replaced after funds are allocated".to_string(),
                     ));
@@ -1388,6 +1390,48 @@ mod tests {
             MockGoalEntryRepo::default(),
             MockPocketRepo::default(),
             sub_goal_repo,
+        );
+
+        let err = service
+            .update_goal(
+                goal_id,
+                user_id,
+                UpdateGoal {
+                    name: None,
+                    description: None,
+                    target_amount: None,
+                    current_amount: None,
+                    pocket_id: None,
+                    icon: None,
+                    sub_goals: Some(vec![CreateSubGoal {
+                        name: "Part".to_string(),
+                        target_amount: Decimal::new(100, 0),
+                    }]),
+                },
+            )
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(err, AppError::ValidationError(msg) if msg == "Sub goals cannot be replaced after funds are allocated")
+        );
+    }
+
+    #[tokio::test]
+    async fn update_goal_rejects_adding_sub_goals_when_goal_has_existing_progress() {
+        let goal_id = Uuid::new_v4();
+        let user_id = Uuid::new_v4();
+        let mut goal_repo_state = MockGoalState::default();
+        goal_repo_state
+            .goals
+            .insert(goal_id, sample_goal_detail(goal_id, Decimal::new(5, 0)));
+        let goal_repo = MockGoalRepo {
+            state: Arc::new(Mutex::new(goal_repo_state)),
+        };
+        let service = make_service(
+            goal_repo,
+            MockGoalEntryRepo::default(),
+            MockPocketRepo::default(),
         );
 
         let err = service

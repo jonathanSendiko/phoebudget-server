@@ -109,7 +109,7 @@ impl SubGoalRepository {
             SELECT EXISTS (
                 SELECT 1
                 FROM goal_entries
-                WHERE goal_id = $1 AND sub_goal_id IS NOT NULL
+                WHERE goal_id = $1
             )
             "#,
         )
