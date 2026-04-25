@@ -16,6 +16,7 @@ pub struct CreateGoal {
     pub current_amount: Option<Decimal>, // Manual amount, default 0
     pub pocket_id: Uuid,
     pub icon: Option<String>,
+    pub sub_goals: Option<Vec<CreateSubGoal>>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -26,6 +27,13 @@ pub struct UpdateGoal {
     pub current_amount: Option<Decimal>,
     pub pocket_id: Option<Uuid>,
     pub icon: Option<String>,
+    pub sub_goals: Option<Vec<CreateSubGoal>>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct CreateSubGoal {
+    pub name: String,
+    pub target_amount: Decimal,
 }
 
 #[derive(Serialize, Debug)]
@@ -54,12 +62,24 @@ pub struct GoalDetail {
     #[serde(serialize_with = "round_currency")]
     pub percentage: Decimal,
     pub pocket: PocketSummary,
+    pub sub_goals: Vec<SubGoal>,
     pub created_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Serialize)]
 pub struct GoalId {
     pub id: Uuid,
+}
+
+#[derive(Serialize, Debug)]
+pub struct SubGoal {
+    pub id: Uuid,
+    pub goal_id: Uuid,
+    pub name: String,
+    #[serde(serialize_with = "round_currency")]
+    pub target_amount: Decimal,
+    pub position: i32,
+    pub created_at: Option<DateTime<Utc>>,
 }
 
 // --- Goal Entries DTOs ---

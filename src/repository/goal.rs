@@ -154,6 +154,7 @@ impl GoalRepository {
                 name: row.pocket_name,
                 icon: row.pocket_icon,
             },
+            sub_goals: Vec::new(),
             created_at: row.created_at,
         })
     }

@@ -18,7 +18,8 @@ pub use finance::{
     UpdateCurrency,
 };
 pub use goal::{
-    CreateGoal, CreateGoalEntry, GoalDetail, GoalEntry, GoalId, GoalSummary, UpdateGoal,
+    CreateGoal, CreateGoalEntry, CreateSubGoal, GoalDetail, GoalEntry, GoalId, GoalSummary,
+    SubGoal, UpdateGoal,
 };
 pub use pocket::{CreatePocket, Pocket, PocketDetail, PocketId, PocketSummary, UpdatePocket};
 pub use portfolio::{

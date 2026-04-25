@@ -83,6 +83,7 @@ impl AppState {
             repository::GoalRepository::new(self.db.clone()),
             repository::GoalEntryRepository::new(self.db.clone()),
             repository::PocketRepository::new(self.db.clone()),
+            repository::SubGoalRepository::new(self.db.clone()),
         )
     }
 
