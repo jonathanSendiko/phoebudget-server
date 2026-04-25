@@ -73,6 +73,14 @@ pub trait GoalEntryRepo: Send + Sync {
         description: Option<String>,
         date: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<Uuid, AppError>;
+    async fn create_and_update_goal_amount(
+        &self,
+        goal_id: Uuid,
+        sub_goal_id: Option<Uuid>,
+        amount: Decimal,
+        description: Option<String>,
+        date: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<Uuid, AppError>;
     async fn get_by_goal(&self, goal_id: Uuid) -> Result<Vec<crate::schemas::GoalEntry>, AppError>;
 }
 
@@ -89,6 +97,7 @@ pub trait SubGoalRepo: Send + Sync {
         sub_goals: &[crate::schemas::CreateSubGoal],
     ) -> Result<(), AppError>;
     async fn get_by_goal(&self, goal_id: Uuid) -> Result<Vec<crate::schemas::SubGoal>, AppError>;
+    async fn has_allocated_entries(&self, goal_id: Uuid) -> Result<bool, AppError>;
 }
 
 #[async_trait]
@@ -220,6 +229,18 @@ impl GoalEntryRepo for GoalEntryRepository {
             .await
     }
 
+    async fn create_and_update_goal_amount(
+        &self,
+        goal_id: Uuid,
+        sub_goal_id: Option<Uuid>,
+        amount: Decimal,
+        description: Option<String>,
+        date: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<Uuid, AppError> {
+        self.create_and_update_goal_amount(goal_id, sub_goal_id, amount, description, date)
+            .await
+    }
+
     async fn get_by_goal(&self, goal_id: Uuid) -> Result<Vec<crate::schemas::GoalEntry>, AppError> {
         self.get_by_goal(goal_id).await
     }
@@ -244,6 +265,10 @@ impl SubGoalRepo for SubGoalRepository {
 
     async fn get_by_goal(&self, goal_id: Uuid) -> Result<Vec<crate::schemas::SubGoal>, AppError> {
         self.get_by_goal(goal_id).await
+    }
+
+    async fn has_allocated_entries(&self, goal_id: Uuid) -> Result<bool, AppError> {
+        self.has_allocated_entries(goal_id).await
     }
 }
 
@@ -385,6 +410,11 @@ where
             let current_goal = self.goal_repo.get_by_id(id, user_id).await?;
             let target_amount = req.target_amount.unwrap_or(current_goal.target_amount);
             if let Some(sub_goals) = &req.sub_goals {
+                if self.sub_goal_repo.has_allocated_entries(id).await? {
+                    return Err(AppError::ValidationError(
+                        "Sub goals cannot be replaced after funds are allocated".to_string(),
+                    ));
+                }
                 validate_sub_goals(sub_goals, target_amount)?;
             } else {
                 let existing_sub_goals = self.sub_goal_repo.get_by_goal(id).await?;
@@ -453,7 +483,7 @@ where
         req: crate::schemas::CreateGoalEntry,
     ) -> Result<Uuid, AppError> {
         // 1. Verify goal ownership and get current amount
-        let goal = self.goal_repo.get_by_id(goal_id, user_id).await?;
+        let _goal = self.goal_repo.get_by_id(goal_id, user_id).await?;
         let sub_goals = self.sub_goal_repo.get_by_goal(goal_id).await?;
         let has_sub_goals = !sub_goals.is_empty();
         match (has_sub_goals, req.sub_goal_id) {
@@ -477,30 +507,14 @@ where
             (false, None) => {}
         }
 
-        // 2. Create entry
         let entry_id = self
             .entry_repo
-            .create(
+            .create_and_update_goal_amount(
                 goal_id,
                 req.sub_goal_id,
                 req.amount,
                 req.description,
                 req.date,
-            )
-            .await?;
-
-        // 3. Update goal current_amount
-        let new_amount = goal.current_amount + req.amount;
-        self.goal_repo
-            .update(
-                goal_id,
-                user_id,
-                None,
-                None,
-                None,
-                Some(new_amount),
-                None,
-                None,
             )
             .await?;
 
@@ -806,6 +820,21 @@ mod tests {
             Ok(Uuid::new_v4())
         }
 
+        async fn create_and_update_goal_amount(
+            &self,
+            goal_id: Uuid,
+            sub_goal_id: Option<Uuid>,
+            amount: Decimal,
+            description: Option<String>,
+            date: Option<DateTime<Utc>>,
+        ) -> Result<Uuid, AppError> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push((goal_id, sub_goal_id, amount, description, date));
+            Ok(Uuid::new_v4())
+        }
+
         async fn get_by_goal(&self, _goal_id: Uuid) -> Result<Vec<GoalEntry>, AppError> {
             let entries = self.entries.lock().unwrap();
             Ok(entries.iter().map(clone_goal_entry_ref).collect())
@@ -836,6 +865,7 @@ mod tests {
     struct MockSubGoalRepo {
         replace_calls: Arc<Mutex<Vec<(Uuid, Vec<CreateSubGoal>)>>>,
         sub_goals: Arc<Mutex<Vec<SubGoal>>>,
+        has_allocated_entries: bool,
     }
 
     #[async_trait]
@@ -855,6 +885,10 @@ mod tests {
         async fn get_by_goal(&self, _goal_id: Uuid) -> Result<Vec<SubGoal>, AppError> {
             let sub_goals = self.sub_goals.lock().unwrap();
             Ok(sub_goals.iter().map(clone_sub_goal_ref).collect())
+        }
+
+        async fn has_allocated_entries(&self, _goal_id: Uuid) -> Result<bool, AppError> {
+            Ok(self.has_allocated_entries)
         }
     }
 
@@ -1334,6 +1368,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn update_goal_rejects_replacing_sub_goals_after_funds_are_allocated() {
+        let goal_id = Uuid::new_v4();
+        let user_id = Uuid::new_v4();
+        let mut goal_repo_state = MockGoalState::default();
+        goal_repo_state
+            .goals
+            .insert(goal_id, sample_goal_detail(goal_id, Decimal::ZERO));
+        let goal_repo = MockGoalRepo {
+            state: Arc::new(Mutex::new(goal_repo_state)),
+        };
+        let sub_goal_repo = MockSubGoalRepo {
+            replace_calls: Arc::new(Mutex::new(Vec::new())),
+            sub_goals: Arc::new(Mutex::new(Vec::new())),
+            has_allocated_entries: true,
+        };
+        let service = make_service_with_sub_goals(
+            goal_repo,
+            MockGoalEntryRepo::default(),
+            MockPocketRepo::default(),
+            sub_goal_repo,
+        );
+
+        let err = service
+            .update_goal(
+                goal_id,
+                user_id,
+                UpdateGoal {
+                    name: None,
+                    description: None,
+                    target_amount: None,
+                    current_amount: None,
+                    pocket_id: None,
+                    icon: None,
+                    sub_goals: Some(vec![CreateSubGoal {
+                        name: "Part".to_string(),
+                        target_amount: Decimal::new(100, 0),
+                    }]),
+                },
+            )
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(err, AppError::ValidationError(msg) if msg == "Sub goals cannot be replaced after funds are allocated")
+        );
+    }
+
+    #[tokio::test]
     async fn update_goal_returns_not_found_when_repo_updates_nothing() {
         let goal_repo = MockGoalRepo {
             state: Arc::new(Mutex::new(MockGoalState {
@@ -1390,6 +1472,7 @@ mod tests {
                 position: 0,
                 created_at: None,
             }])),
+            has_allocated_entries: false,
         };
         let service = make_service_with_sub_goals(
             goal_repo,
@@ -1421,7 +1504,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_goal_entry_updates_goal_amount() {
+    async fn create_goal_entry_uses_atomic_entry_repo_call() {
         let goal_id = Uuid::new_v4();
         let user_id = Uuid::new_v4();
         let mut goal_repo_state = MockGoalState::default();
@@ -1450,12 +1533,7 @@ mod tests {
         assert_eq!(entry_repo.calls.lock().unwrap().len(), 1);
         assert_eq!(entry_repo.calls.lock().unwrap()[0].1, None);
         let updates = goal_repo.state.lock().unwrap().update_calls.clone();
-        assert_eq!(updates.len(), 1);
-        let update = &updates[0];
-        assert_eq!(update.0, goal_id);
-        assert_eq!(update.1, user_id);
-        assert_eq!(update.5, Some(Decimal::new(12, 0)));
-        assert_eq!(update.6, None);
+        assert_eq!(updates.len(), 0);
     }
 
     #[tokio::test]
@@ -1481,6 +1559,7 @@ mod tests {
                 position: 0,
                 created_at: None,
             }])),
+            has_allocated_entries: false,
         };
         let service = make_service_with_sub_goals(
             goal_repo,
@@ -1533,6 +1612,7 @@ mod tests {
                 position: 0,
                 created_at: None,
             }])),
+            has_allocated_entries: false,
         };
         let service = make_service_with_sub_goals(
             goal_repo,

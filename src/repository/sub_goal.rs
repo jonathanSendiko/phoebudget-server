@@ -102,4 +102,21 @@ impl SubGoalRepository {
             })
             .collect())
     }
+
+    pub async fn has_allocated_entries(&self, goal_id: Uuid) -> Result<bool, AppError> {
+        let exists = sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM goal_entries
+                WHERE goal_id = $1 AND sub_goal_id IS NOT NULL
+            )
+            "#,
+        )
+        .bind(goal_id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(exists)
+    }
 }

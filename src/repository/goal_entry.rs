@@ -40,6 +40,54 @@ impl GoalEntryRepository {
         Ok(id)
     }
 
+    pub async fn create_and_update_goal_amount(
+        &self,
+        goal_id: Uuid,
+        sub_goal_id: Option<Uuid>,
+        amount: Decimal,
+        description: Option<String>,
+        date: Option<DateTime<Utc>>,
+    ) -> Result<Uuid, AppError> {
+        let mut tx = self.pool.begin().await?;
+        let date = date.unwrap_or_else(Utc::now);
+
+        let id = sqlx::query_scalar::<_, Uuid>(
+            r#"
+            INSERT INTO goal_entries (goal_id, sub_goal_id, amount, description, date)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id
+            "#,
+        )
+        .bind(goal_id)
+        .bind(sub_goal_id)
+        .bind(amount)
+        .bind(description)
+        .bind(date)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        let result = sqlx::query(
+            r#"
+            UPDATE financial_goals
+            SET current_amount = current_amount + $2,
+                updated_at = NOW()
+            WHERE id = $1
+            "#,
+        )
+        .bind(goal_id)
+        .bind(amount)
+        .execute(&mut *tx)
+        .await?;
+
+        if result.rows_affected() == 0 {
+            tx.rollback().await?;
+            return Err(AppError::NotFoundError("Goal not found".to_string()));
+        }
+
+        tx.commit().await?;
+        Ok(id)
+    }
+
     pub async fn get_by_goal(
         &self,
         goal_id: Uuid,
