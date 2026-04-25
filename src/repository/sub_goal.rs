@@ -54,16 +54,26 @@ impl SubGoalRepository {
             goal_id: Uuid,
             name: String,
             target_amount: Decimal,
+            current_amount: Decimal,
             position: i32,
             created_at: Option<chrono::DateTime<chrono::Utc>>,
         }
 
         let rows = sqlx::query_as::<_, Row>(
             r#"
-            SELECT id, goal_id, name, target_amount, position, created_at
-            FROM goal_sub_goals
-            WHERE goal_id = $1
-            ORDER BY position ASC
+            SELECT
+                sg.id,
+                sg.goal_id,
+                sg.name,
+                sg.target_amount,
+                COALESCE(SUM(ge.amount), 0) AS current_amount,
+                sg.position,
+                sg.created_at
+            FROM goal_sub_goals sg
+            LEFT JOIN goal_entries ge ON ge.sub_goal_id = sg.id
+            WHERE sg.goal_id = $1
+            GROUP BY sg.id, sg.goal_id, sg.name, sg.target_amount, sg.position, sg.created_at
+            ORDER BY sg.position ASC
             "#,
         )
         .bind(goal_id)
@@ -72,13 +82,23 @@ impl SubGoalRepository {
 
         Ok(rows
             .into_iter()
-            .map(|row| crate::schemas::SubGoal {
-                id: row.id,
-                goal_id: row.goal_id,
-                name: row.name,
-                target_amount: row.target_amount,
-                position: row.position,
-                created_at: row.created_at,
+            .map(|row| {
+                let percentage = if row.target_amount.is_zero() {
+                    Decimal::ZERO
+                } else {
+                    (row.current_amount / row.target_amount) * Decimal::from(100)
+                };
+
+                crate::schemas::SubGoal {
+                    id: row.id,
+                    goal_id: row.goal_id,
+                    name: row.name,
+                    target_amount: row.target_amount,
+                    current_amount: row.current_amount,
+                    percentage,
+                    position: row.position,
+                    created_at: row.created_at,
+                }
             })
             .collect())
     }

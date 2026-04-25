@@ -78,6 +78,10 @@ pub struct SubGoal {
     pub name: String,
     #[serde(serialize_with = "round_currency")]
     pub target_amount: Decimal,
+    #[serde(serialize_with = "round_currency")]
+    pub current_amount: Decimal,
+    #[serde(serialize_with = "round_currency")]
+    pub percentage: Decimal,
     pub position: i32,
     pub created_at: Option<DateTime<Utc>>,
 }
@@ -89,12 +93,14 @@ pub struct CreateGoalEntry {
     pub amount: Decimal,
     pub description: Option<String>,
     pub date: Option<DateTime<Utc>>,
+    pub sub_goal_id: Option<Uuid>,
 }
 
 #[derive(Serialize, Debug)]
 pub struct GoalEntry {
     pub id: Uuid,
     pub goal_id: Uuid,
+    pub sub_goal_id: Option<Uuid>,
     #[serde(serialize_with = "round_currency")]
     pub amount: Decimal,
     pub description: Option<String>,
